@@ -64,7 +64,7 @@ def main():
     # Start dashboard
     try:
         from status_dashboard import app
-        app.run(host='localhost', port=5000, debug=False)
+        app.run(host='0.0.0.0', port=5000, debug=False)
     except ImportError as e:
         print(f"❌ Error importing dashboard: {e}")
         print("   Make sure status_dashboard.py is in the current directory")
