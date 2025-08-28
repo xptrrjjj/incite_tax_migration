@@ -78,12 +78,16 @@ class StatusDashboard:
         stats = db.get_migration_stats()
         file_stats = stats['files']
         
+        # Safely handle None values
+        total_size_bytes = file_stats.get('total_size_bytes') or 0
+        total_size_gb = round(total_size_bytes / (1024**3), 2) if total_size_bytes else 0
+        
         return {
-            'total_files': file_stats.get('total_files', 0),
-            'backup_only': file_stats.get('backup_only', 0),
-            'fully_migrated': file_stats.get('fully_migrated', 0),
-            'unique_accounts': file_stats.get('unique_accounts', 0),
-            'total_size_gb': round((file_stats.get('total_size_bytes', 0) or 0) / (1024**3), 2)
+            'total_files': file_stats.get('total_files', 0) or 0,
+            'backup_only': file_stats.get('backup_only', 0) or 0,
+            'fully_migrated': file_stats.get('fully_migrated', 0) or 0,
+            'unique_accounts': file_stats.get('unique_accounts', 0) or 0,
+            'total_size_gb': total_size_gb
         }
     
     def _get_progress_data(self, db):
@@ -185,11 +189,14 @@ class StatusDashboard:
         
         accounts = []
         for row in cursor.fetchall():
+            total_size_bytes = row[2] or 0
+            total_size_mb = round(total_size_bytes / (1024**2), 1) if total_size_bytes else 0
+            
             accounts.append({
                 'name': row[0] or 'Unknown',
-                'file_count': row[1],
-                'total_size_mb': round((row[2] or 0) / (1024**2), 1),
-                'migrated_count': row[3]
+                'file_count': row[1] or 0,
+                'total_size_mb': total_size_mb,
+                'migrated_count': row[3] or 0
             })
         
         return accounts
@@ -235,11 +242,19 @@ class StatusDashboard:
             phase = "Unknown"
             status = "Unable to determine status"
         
+        # Safely calculate progress percentages
+        backup_progress = 0
+        migration_progress = 0
+        
+        if total_files and total_files > 0:
+            backup_progress = round((backup_only / total_files) * 100, 1)
+            migration_progress = round((fully_migrated / total_files) * 100, 1)
+        
         return {
             'current_phase': phase,
             'status_description': status,
-            'backup_progress': round((backup_only / max(total_files, 1)) * 100, 1),
-            'migration_progress': round((fully_migrated / max(total_files, 1)) * 100, 1)
+            'backup_progress': backup_progress,
+            'migration_progress': migration_progress
         }
 
 # Global dashboard instance
