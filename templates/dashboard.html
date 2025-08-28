@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Migration Status Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .dashboard-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        
+        .header .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.running { background: #2ecc71; }
+        .status-indicator.paused { background: #f39c12; }
+        .status-indicator.error { background: #e74c3c; }
+        .status-indicator.complete { background: #27ae60; }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            border-left: 5px solid #3498db;
+            transition: transform 0.2s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .stat-card.phase1 { border-left-color: #2ecc71; }
+        .stat-card.phase2 { border-left-color: #f39c12; }
+        .stat-card.error { border-left-color: #e74c3c; }
+        
+        .stat-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #2c3e50;
+            display: block;
+        }
+        
+        .stat-label {
+            color: #7f8c8d;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 5px;
+        }
+        
+        .progress-section {
+            margin-bottom: 30px;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 25px;
+            background: #ecf0f1;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #2ecc71, #27ae60);
+            border-radius: 12px;
+            transition: width 1s ease;
+            position: relative;
+        }
+        
+        .progress-fill.phase2 {
+            background: linear-gradient(90deg, #f39c12, #e67e22);
+        }
+        
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        
+        .tables-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        
+        @media (max-width: 768px) {
+            .tables-container {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .table-section {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+        }
+        
+        .table-section h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            text-align: left;
+            padding: 10px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        
+        th {
+            background: #3498db;
+            color: white;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        
+        td {
+            font-size: 0.9em;
+        }
+        
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .status-badge.completed { background: #d5f4e6; color: #27ae60; }
+        .status-badge.running { background: #fef9e7; color: #f39c12; }
+        .status-badge.failed { background: #fadbd8; color: #e74c3c; }
+        
+        .refresh-info {
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 0.9em;
+            margin-top: 20px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+        
+        .error-message {
+            background: #fadbd8;
+            color: #e74c3c;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .phase-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .phase-info h2 {
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="header">
+            <h1>Migration Status Dashboard</h1>
+            <div class="subtitle">
+                <span class="status-indicator running"></span>
+                Real-time monitoring of Salesforce file migration
+            </div>
+        </div>
+        
+        <div class="content">
+            <div id="loading" class="loading">
+                <h3>Loading migration status...</h3>
+            </div>
+            
+            <div id="error" class="error-message" style="display: none;">
+                <h3>Unable to load migration data</h3>
+                <p id="error-message"></p>
+            </div>
+            
+            <div id="dashboard-content" style="display: none;">
+                <!-- Phase Status -->
+                <div class="phase-info">
+                    <h2 id="current-phase">Loading...</h2>
+                    <p id="phase-description">Retrieving migration status...</p>
+                </div>
+                
+                <!-- Stats Grid -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <span class="stat-value" id="total-files">-</span>
+                        <div class="stat-label">Total Files</div>
+                    </div>
+                    <div class="stat-card phase1">
+                        <span class="stat-value" id="backup-files">-</span>
+                        <div class="stat-label">Backed Up Files</div>
+                    </div>
+                    <div class="stat-card phase2">
+                        <span class="stat-value" id="migrated-files">-</span>
+                        <div class="stat-label">Fully Migrated</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="total-accounts">-</span>
+                        <div class="stat-label">Total Accounts</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="total-size">-</span>
+                        <div class="stat-label">Total Size (GB)</div>
+                    </div>
+                </div>
+                
+                <!-- Progress Bars -->
+                <div class="progress-section">
+                    <h3>Phase 1 Progress (Backup)</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="backup-progress">
+                            <div class="progress-text" id="backup-progress-text">0%</div>
+                        </div>
+                    </div>
+                    
+                    <h3>Phase 2 Progress (Full Migration)</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill phase2" id="migration-progress">
+                            <div class="progress-text" id="migration-progress-text">0%</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Tables -->
+                <div class="tables-container">
+                    <!-- Recent Runs -->
+                    <div class="table-section">
+                        <h3>Recent Migration Runs</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Duration</th>
+                                    <th>Files</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recent-runs">
+                                <tr><td colspan="4">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- Top Accounts -->
+                    <div class="table-section">
+                        <h3>Top Accounts by File Count</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Account</th>
+                                    <th>Files</th>
+                                    <th>Size (MB)</th>
+                                    <th>Migrated</th>
+                                </tr>
+                            </thead>
+                            <tbody id="top-accounts">
+                                <tr><td colspan="4">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Recent Errors -->
+                <div class="table-section">
+                    <h3>Recent Errors (Last 24 Hours)</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Error Type</th>
+                                <th>Count</th>
+                                <th>Latest Occurrence</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-errors">
+                            <tr><td colspan="3">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="refresh-info">
+                <p>Last updated: <span id="last-updated">-</span></p>
+                <p>Auto-refreshes every 30 seconds</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let refreshInterval;
+        
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toLocaleString();
+        }
+        
+        function formatDateTime(dateString) {
+            if (!dateString) return '-';
+            try {
+                return new Date(dateString).toLocaleString();
+            } catch {
+                return dateString;
+            }
+        }
+        
+        function updateDashboard() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        showError(data.error);
+                        return;
+                    }
+                    
+                    hideError();
+                    showDashboard();
+                    populateData(data);
+                })
+                .catch(error => {
+                    console.error('Error fetching data:', error);
+                    showError('Failed to connect to migration database');
+                });
+        }
+        
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('dashboard-content').style.display = 'none';
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error-message').textContent = message;
+        }
+        
+        function hideError() {
+            document.getElementById('error').style.display = 'none';
+        }
+        
+        function showDashboard() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('dashboard-content').style.display = 'block';
+        }
+        
+        function populateData(data) {
+            // Update phase status
+            document.getElementById('current-phase').textContent = data.phase_status.current_phase;
+            document.getElementById('phase-description').textContent = data.phase_status.status_description;
+            
+            // Update overview stats
+            document.getElementById('total-files').textContent = formatNumber(data.overview.total_files);
+            document.getElementById('backup-files').textContent = formatNumber(data.overview.backup_only);
+            document.getElementById('migrated-files').textContent = formatNumber(data.overview.fully_migrated);
+            document.getElementById('total-accounts').textContent = formatNumber(data.overview.unique_accounts);
+            document.getElementById('total-size').textContent = data.overview.total_size_gb;
+            
+            // Update progress bars
+            const backupProgress = data.phase_status.backup_progress || 0;
+            const migrationProgress = data.phase_status.migration_progress || 0;
+            
+            document.getElementById('backup-progress').style.width = backupProgress + '%';
+            document.getElementById('backup-progress-text').textContent = backupProgress.toFixed(1) + '%';
+            
+            document.getElementById('migration-progress').style.width = migrationProgress + '%';
+            document.getElementById('migration-progress-text').textContent = migrationProgress.toFixed(1) + '%';
+            
+            // Update recent runs
+            const runsTable = document.getElementById('recent-runs');
+            runsTable.innerHTML = data.recent_runs.length ? '' : '<tr><td colspan="4">No recent runs</td></tr>';
+            
+            data.recent_runs.slice(0, 5).forEach(run => {
+                const row = runsTable.insertRow();
+                row.innerHTML = `
+                    <td>${run.run_type}</td>
+                    <td><span class="status-badge ${run.status}">${run.status}</span></td>
+                    <td>${run.duration || '-'}</td>
+                    <td>${formatNumber(run.successful_files || 0)}</td>
+                `;
+            });
+            
+            // Update top accounts
+            const accountsTable = document.getElementById('top-accounts');
+            accountsTable.innerHTML = data.accounts.length ? '' : '<tr><td colspan="4">No account data</td></tr>';
+            
+            data.accounts.slice(0, 5).forEach(account => {
+                const row = accountsTable.insertRow();
+                row.innerHTML = `
+                    <td>${account.name}</td>
+                    <td>${formatNumber(account.file_count)}</td>
+                    <td>${account.total_size_mb}</td>
+                    <td>${formatNumber(account.migrated_count)}</td>
+                `;
+            });
+            
+            // Update recent errors
+            const errorsTable = document.getElementById('recent-errors');
+            errorsTable.innerHTML = data.errors.length ? '' : '<tr><td colspan="3">No recent errors ✅</td></tr>';
+            
+            data.errors.slice(0, 5).forEach(error => {
+                const row = errorsTable.insertRow();
+                row.innerHTML = `
+                    <td>${error.type}</td>
+                    <td>${error.count}</td>
+                    <td>${formatDateTime(error.latest)}</td>
+                `;
+            });
+            
+            // Update timestamp
+            document.getElementById('last-updated').textContent = formatDateTime(data.timestamp);
+        }
+        
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            updateDashboard();
+            
+            // Set up auto-refresh
+            refreshInterval = setInterval(updateDashboard, 30000);
+        });
+        
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                clearInterval(refreshInterval);
+            } else {
+                updateDashboard();
+                refreshInterval = setInterval(updateDashboard, 30000);
+            }
+        });
+    </script>
+</body>
+</html>
