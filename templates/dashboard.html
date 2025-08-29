@@ -451,9 +451,16 @@
             runsTable.innerHTML = data.recent_runs.length ? '' : '<tr><td colspan="4">No recent runs</td></tr>';
             
             data.recent_runs.slice(0, 5).forEach(run => {
+                // Make run types more user-friendly
+                let displayType = run.run_type;
+                if (run.run_type === 'backup_chunked') displayType = 'Chunked Backup';
+                else if (run.run_type === 'backup') displayType = 'Full Backup';
+                else if (run.run_type === 'incremental') displayType = 'Incremental';
+                else if (run.run_type === 'full_migration') displayType = 'Full Migration';
+                
                 const row = runsTable.insertRow();
                 row.innerHTML = `
-                    <td>${run.run_type}</td>
+                    <td>${displayType}</td>
                     <td><span class="status-badge ${run.status}">${run.status}</span></td>
                     <td>${run.duration || '-'}</td>
                     <td>${formatNumber(run.successful_files || 0)}</td>
