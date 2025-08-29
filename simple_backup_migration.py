@@ -72,7 +72,7 @@ def setup_logging() -> logging.Logger:
     log_file = log_dir / f"simple_backup_{timestamp}.log"
     
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,  # Enable debug logging temporarily
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler(log_file),
@@ -297,6 +297,8 @@ class S3Manager:
     def download_via_salesforce(self, s3_url: str, sf_instance: Salesforce, doclistentry_id: str) -> Optional[bytes]:
         """Download file through Salesforce's authenticated session or ContentDocument API."""
         try:
+            self.logger.debug(f"Attempting download of: {s3_url}")
+            
             # Method 1: Try direct download with Salesforce session
             headers = {
                 'Authorization': f'Bearer {sf_instance.session_id}',
@@ -308,8 +310,8 @@ class S3Manager:
             if response.status_code == 200:
                 self.logger.info(f"Successfully downloaded via Salesforce session ({len(response.content)} bytes)")
                 return response.content
-            elif response.status_code == 403:
-                self.logger.info("Direct S3 access denied, trying alternative Salesforce methods...")
+            elif response.status_code in [400, 403]:
+                self.logger.info(f"Direct access failed (Status: {response.status_code}), trying ContentDocument API...")
                 
                 # Method 2: Try to find corresponding ContentDocument
                 try:
@@ -328,6 +330,7 @@ class S3Manager:
                         
                         # Try to download via ContentVersion
                         version_url = f"{sf_instance.base_url}sobjects/ContentVersion/{version_id}/VersionData"
+                        self.logger.debug(f"Trying ContentVersion URL: {version_url}")
                         version_response = requests.get(version_url, headers=headers, timeout=120)
                         
                         if version_response.status_code == 200:
@@ -335,13 +338,29 @@ class S3Manager:
                             return version_response.content
                         else:
                             self.logger.warning(f"ContentVersion download failed. Status: {version_response.status_code}")
+                    else:
+                        self.logger.info("No ContentDocumentLink found for this DocListEntry")
                     
                 except Exception as content_error:
                     self.logger.warning(f"ContentDocument method failed: {content_error}")
                 
+                # Method 3: Try without authentication (public access)
+                self.logger.info("Trying public access without authentication...")
+                try:
+                    public_response = requests.get(s3_url, timeout=120)
+                    if public_response.status_code == 200:
+                        self.logger.info(f"Successfully downloaded via public access ({len(public_response.content)} bytes)")
+                        return public_response.content
+                    else:
+                        self.logger.info(f"Public access failed. Status: {public_response.status_code}")
+                except Exception as public_error:
+                    self.logger.warning(f"Public access method failed: {public_error}")
+                
                 return None
             else:
                 self.logger.error(f"Failed to download file. Status: {response.status_code}")
+                self.logger.debug(f"Response headers: {response.headers}")
+                self.logger.debug(f"Response text: {response.text[:500]}")
                 return None
                 
         except Exception as e:
@@ -468,6 +487,7 @@ class SimpleBackupMigration:
             external_s3_url = file_info['document_url']
             
             self.logger.info(f"📄 Processing file: {filename} (Account: {account_name})")
+            self.logger.debug(f"S3 URL: {external_s3_url}")
             
             # Check if file should be processed
             should_process, reason = self.should_process_file(file_info)
