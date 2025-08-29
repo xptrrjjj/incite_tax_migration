@@ -37,6 +37,27 @@ from migration_db import MigrationDB, calculate_file_hash
 try:
     from config import SALESFORCE_CONFIG, AWS_CONFIG, MIGRATION_CONFIG
     print("✓ Using configuration from config.py")
+    
+    # Debug: Show which configuration values are being used
+    print("\n" + "="*60)
+    print("DEBUG: CONFIGURATION VALUES LOADED")
+    print("="*60)
+    print("MIGRATION_CONFIG values:")
+    print(f"  dry_run: {MIGRATION_CONFIG.get('dry_run')}")
+    print(f"  test_single_account: {MIGRATION_CONFIG.get('test_single_account')}")
+    print(f"  test_account_name: {MIGRATION_CONFIG.get('test_account_name')}")
+    print(f"  max_test_files: {MIGRATION_CONFIG.get('max_test_files')}")
+    print(f"  batch_size: {MIGRATION_CONFIG.get('batch_size')}")
+    
+    print("\nAWS_CONFIG values:")
+    print(f"  region: {AWS_CONFIG.get('region')}")
+    print(f"  bucket_name: {AWS_CONFIG.get('bucket_name')}")
+    
+    print("\nSALESFORCE_CONFIG values:")
+    print(f"  username: {SALESFORCE_CONFIG.get('username')}")
+    print(f"  domain: {SALESFORCE_CONFIG.get('domain')}")
+    print("="*60)
+    
 except ImportError:
     print("❌ config.py not found. Please copy config_template.py to config.py and update it.")
     sys.exit(1)
@@ -627,13 +648,25 @@ def main():
     print("Simple Backup Migration Script")
     print("=" * 50)
     
+    # Debug: Show what's actually being used in main()
+    print("DEBUG: Values at runtime in main():")
+    print(f"  MIGRATION_CONFIG['dry_run'] = {MIGRATION_CONFIG.get('dry_run')}")
+    print(f"  MIGRATION_CONFIG['test_single_account'] = {MIGRATION_CONFIG.get('test_single_account')}")
+    print("=" * 50)
+    
     # Show current mode
     if MIGRATION_CONFIG.get('dry_run', False):
         print("🧪 DRY RUN MODE - No files will actually be moved")
         print("=" * 50)
+    else:
+        print("🚀 LIVE MODE - Files will be processed")
+        print("=" * 50)
     
     if MIGRATION_CONFIG.get('test_single_account', False):
         print("🔍 TEST MODE - Single Account Only")
+        print("=" * 50)
+    else:
+        print("🌍 FULL MODE - All Accounts")
         print("=" * 50)
     
     # Setup logging
