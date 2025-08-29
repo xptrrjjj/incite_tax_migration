@@ -33,19 +33,34 @@ def test_contentversion_access():
     # Get test files with ContentDocumentLinks
     print("\n📄 Finding files with ContentDocument relationships...")
     
-    # Get DocListEntry records that have ContentDocumentLinks
-    result = sf.query("""
-        SELECT Id, Name, Document__c, Identifier__c,
-               (SELECT ContentDocumentId, ContentDocument.Title, 
-                       ContentDocument.LatestPublishedVersionId,
-                       ContentDocument.FileType, ContentDocument.ContentSize
-                FROM ContentDocumentLinks 
-                WHERE LinkedEntityId = Id)
+    # First get DocListEntry records
+    doclist_result = sf.query("""
+        SELECT Id, Name, Document__c, Identifier__c
         FROM DocListEntry__c 
         WHERE Document__c != NULL 
         AND Identifier__c != NULL 
         LIMIT 5
     """)
+    
+    if not doclist_result['records']:
+        print("❌ No DocListEntry records found")
+        return
+    
+    # Then for each record, find its ContentDocumentLinks
+    result = {'records': []}
+    for record in doclist_result['records']:
+        # Get ContentDocumentLinks for this record
+        links_result = sf.query(f"""
+            SELECT ContentDocumentId, ContentDocument.Title, 
+                   ContentDocument.LatestPublishedVersionId,
+                   ContentDocument.FileType, ContentDocument.ContentSize
+            FROM ContentDocumentLink 
+            WHERE LinkedEntityId = '{record['Id']}'
+        """)
+        
+        # Add the links to the record
+        record['ContentDocumentLinks'] = links_result
+        result['records'].append(record)
     
     if not result['records']:
         print("❌ No records found with ContentDocumentLinks")
