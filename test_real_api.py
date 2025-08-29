@@ -114,17 +114,47 @@ def test_real_api():
                 if presigned_url:
                     print(f"🎉 SUCCESS! Got presigned URL: {presigned_url[:50]}...")
                     
-                    # Test the presigned URL
+                    # Test the presigned URL - try both HEAD and GET
                     print(f"🔍 Testing presigned URL...")
-                    test_response = requests.head(presigned_url, timeout=10)
-                    print(f"Presigned URL status: {test_response.status_code}")
                     
-                    if test_response.status_code == 200:
-                        file_size = test_response.headers.get('content-length', 'unknown')
-                        print(f"✅ File accessible! Size: {file_size} bytes")
-                        return True
-                    else:
-                        print(f"❌ Presigned URL not accessible: {test_response.status_code}")
+                    # Try HEAD request first
+                    try:
+                        head_response = requests.head(presigned_url, timeout=10)
+                        print(f"HEAD status: {head_response.status_code}")
+                        
+                        if head_response.status_code == 200:
+                            file_size = head_response.headers.get('content-length', 'unknown')
+                            print(f"✅ HEAD successful! File size: {file_size} bytes")
+                            return True
+                    except Exception as e:
+                        print(f"HEAD failed: {e}")
+                    
+                    # Try GET request with partial content
+                    try:
+                        get_response = requests.get(presigned_url, stream=True, timeout=30)
+                        print(f"GET status: {get_response.status_code}")
+                        
+                        if get_response.status_code == 200:
+                            # Read first 1024 bytes to verify it's a real file
+                            content_sample = get_response.raw.read(1024)
+                            print(f"✅ GET successful! Got {len(content_sample)} sample bytes")
+                            print(f"Content type: {get_response.headers.get('content-type', 'unknown')}")
+                            print(f"Total size: {get_response.headers.get('content-length', 'unknown')} bytes")
+                            
+                            # Check if it looks like a PDF
+                            if content_sample.startswith(b'%PDF'):
+                                print(f"✅ Confirmed PDF file!")
+                            elif len(content_sample) > 0:
+                                print(f"✅ Got file content (not PDF)")
+                            
+                            return True
+                        else:
+                            print(f"❌ GET failed: {get_response.status_code}")
+                            if get_response.text:
+                                print(f"Error response: {get_response.text[:100]}")
+                    
+                    except Exception as e:
+                        print(f"GET failed: {e}")
                 
                 else:
                     print(f"📋 No URL found in response. Keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
