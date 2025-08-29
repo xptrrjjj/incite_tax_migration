@@ -77,12 +77,10 @@ def test_api_payload():
             print(f"\n[Test {i}.{j}] Payload: {payload}")
             
             try:
-                # Properly encode the JSON 
-                json_data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-                
+                # Use requests' json parameter instead of manual encoding
                 response = requests.post(
                     api_url,
-                    data=json_data,
+                    json=payload,  # Let requests handle JSON encoding
                     headers=headers,
                     timeout=10
                 )
