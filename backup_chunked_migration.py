@@ -596,8 +596,64 @@ class ChunkedBackupMigration:
             except Exception as doc_api_error:
                 self.logger.info(f"Trackland document API failed: {doc_api_error}")
             
-            # Method 3: Try direct access without authentication (fallback)
+            # Method 3: Try browser-like requests with various headers
+            browser_headers_list = [
+                # Standard browser headers
+                {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1'
+                },
+                # With Salesforce session in different formats
+                {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Authorization': f'Bearer {self.sf.session_id}',
+                    'X-SFDC-Session': self.sf.session_id,
+                    'Cookie': f'sid={self.sf.session_id}'
+                },
+                # AWS S3 compatible headers
+                {
+                    'User-Agent': 'aws-cli/2.0.0 Python/3.8.0',
+                    'Authorization': f'Bearer {self.sf.session_id}',
+                    'x-amz-content-sha256': 'UNSIGNED-PAYLOAD'
+                }
+            ]
+            
+            for i, headers in enumerate(browser_headers_list, 1):
+                try:
+                    self.logger.info(f"Trying browser-like headers approach {i}...")
+                    response = requests.get(url, headers=headers, timeout=300, allow_redirects=True)
+                    
+                    if response.status_code == 200:
+                        content = response.content
+                        size = len(content)
+                        
+                        # Basic validation - check if we got actual file content
+                        if size > 0 and not response.headers.get('content-type', '').startswith('text/html'):
+                            self.logger.info(f"✓ Browser-like access successful with headers {i} ({size} bytes)")
+                            
+                            # Check file size limits
+                            max_size_bytes = MIGRATION_CONFIG.get("max_file_size_mb", 100) * 1024 * 1024
+                            if size > max_size_bytes:
+                                raise ValueError(f"File size {size} bytes exceeds limit of {max_size_bytes} bytes")
+                            
+                            return content, size
+                        else:
+                            self.logger.info(f"Headers {i} returned HTML (likely error page)")
+                    else:
+                        self.logger.info(f"Headers {i} returned status {response.status_code}")
+                        
+                except Exception as headers_error:
+                    self.logger.info(f"Headers approach {i} failed: {headers_error}")
+                    continue
+            
+            # Method 4: Try direct access without authentication (fallback)
             try:
+                self.logger.info("Trying direct access without authentication...")
                 response = requests.get(url, timeout=300, allow_redirects=True)
                 
                 if response.status_code == 200:
@@ -620,7 +676,47 @@ class ChunkedBackupMigration:
             except Exception as direct_error:
                 self.logger.info(f"Direct access failed: {direct_error}")
             
-            # Method 4: Try ContentDocument API if we have doclist_entry_id
+            # Method 5: Try alternative URL formats that might work
+            alternative_urls = [
+                # Try with different S3 region patterns
+                url.replace('.s3.us-west-2.amazonaws.com', '.s3.amazonaws.com'),
+                url.replace('.s3.us-west-2.amazonaws.com', '.s3-us-west-2.amazonaws.com'),
+                # Try public S3 URL patterns
+                url.replace('https://trackland-doc-storage.s3.us-west-2.amazonaws.com/', 'https://s3.us-west-2.amazonaws.com/trackland-doc-storage/'),
+                url.replace('https://trackland-doc-storage.s3.us-west-2.amazonaws.com/', 'https://s3-us-west-2.amazonaws.com/trackland-doc-storage/')
+            ]
+            
+            for alt_url in alternative_urls:
+                if alt_url == url:  # Skip if it's the same URL
+                    continue
+                try:
+                    self.logger.info(f"Trying alternative URL format: {alt_url[:60]}...")
+                    response = requests.get(alt_url, timeout=60, allow_redirects=True)
+                    
+                    if response.status_code == 200:
+                        content = response.content
+                        size = len(content)
+                        
+                        # Basic validation - check if we got actual file content
+                        if size > 0 and not response.headers.get('content-type', '').startswith('text/html'):
+                            self.logger.info(f"✓ Alternative URL successful ({size} bytes)")
+                            
+                            # Check file size limits
+                            max_size_bytes = MIGRATION_CONFIG.get("max_file_size_mb", 100) * 1024 * 1024
+                            if size > max_size_bytes:
+                                raise ValueError(f"File size {size} bytes exceeds limit of {max_size_bytes} bytes")
+                            
+                            return content, size
+                        else:
+                            self.logger.info("Alternative URL returned HTML (likely error page)")
+                    else:
+                        self.logger.info(f"Alternative URL returned status {response.status_code}")
+                        
+                except Exception as alt_error:
+                    self.logger.info(f"Alternative URL failed: {alt_error}")
+                    continue
+            
+            # Method 6: Try ContentDocument API if we have doclist_entry_id
             if doclist_entry_id:
                 self.logger.info("Attempting ContentDocument API download...")
                 try:
