@@ -517,65 +517,112 @@ class ChunkedBackupMigration:
             return False
     
     def download_file(self, url: str, doclist_entry_id: str = None) -> Tuple[bytes, int]:
-        """Download file using advanced Salesforce session methods."""
+        """Download file with enhanced authentication strategies."""
         try:
-            # Method 1: Try with Salesforce session authentication
-            headers = {
-                'Authorization': f'Bearer {self.sf.session_id}',
-                'User-Agent': 'simple-salesforce/1.0'
-            }
-            
-            self.logger.debug(f"Attempting download with Salesforce session: {url}")
-            
-            # Check if this is a trackland URL (we should only process trackland files)
+            # Validate that this is a trackland URL
             if 'trackland-doc-storage' not in url:
                 self.logger.warning(f"Skipping non-trackland URL: {url}")
                 raise Exception(f"Not a trackland-doc-storage URL: {url}")
-            response = requests.get(url, headers=headers, timeout=300)
             
-            if response.status_code == 200:
-                content = response.content
-                size = len(content)
-                self.logger.debug(f"Successfully downloaded via Salesforce session ({size} bytes)")
+            self.logger.debug(f"Attempting download: {url}")
+            
+            # Method 1: Try direct access without authentication (in case bucket allows public read)
+            try:
+                response = requests.get(url, timeout=300, allow_redirects=True)
                 
-                # Check file size limits
-                max_size_bytes = MIGRATION_CONFIG.get("max_file_size_mb", 100) * 1024 * 1024
-                if size > max_size_bytes:
-                    raise ValueError(f"File size {size} bytes exceeds limit of {max_size_bytes} bytes")
-                
-                return content, size
-                
-            # Method 2: Try ContentDocument API if we have doclist_entry_id
-            elif response.status_code in [400, 403] and doclist_entry_id:
-                self.logger.debug("Direct access failed, trying ContentDocument API...")
-                content_docs = self._try_content_document_download(doclist_entry_id, headers)
-                if content_docs:
-                    return content_docs
+                if response.status_code == 200:
+                    content = response.content
+                    size = len(content)
+                    
+                    # Basic validation - check if we got actual file content
+                    if size > 0 and not response.headers.get('content-type', '').startswith('text/html'):
+                        self.logger.debug(f"✓ Direct access successful ({size} bytes)")
+                        
+                        # Check file size limits
+                        max_size_bytes = MIGRATION_CONFIG.get("max_file_size_mb", 100) * 1024 * 1024
+                        if size > max_size_bytes:
+                            raise ValueError(f"File size {size} bytes exceeds limit of {max_size_bytes} bytes")
+                        
+                        return content, size
+                    else:
+                        self.logger.debug("Direct access returned HTML (likely error page)")
+                        
+            except Exception as direct_error:
+                self.logger.debug(f"Direct access failed: {direct_error}")
             
-            # Method 3: Try without authentication (public access)
-            self.logger.debug("Trying public access...")
-            public_response = requests.get(url, timeout=300)
-            if public_response.status_code == 200:
-                content = public_response.content
-                size = len(content)
-                self.logger.debug(f"Successfully downloaded via public access ({size} bytes)")
-                return content, size
+            # Method 2: Try ContentDocument API if we have doclist_entry_id (preferred for Salesforce files)
+            if doclist_entry_id:
+                self.logger.debug("Attempting ContentDocument API download...")
+                try:
+                    content_result = self._try_content_document_download(doclist_entry_id)
+                    if content_result:
+                        self.logger.debug(f"✓ ContentDocument API successful")
+                        return content_result
+                except Exception as cd_error:
+                    self.logger.debug(f"ContentDocument API failed: {cd_error}")
             
-            # If all methods fail, log detailed error info
-            self.logger.error(f"All download methods failed for URL: {url}")
-            self.logger.error(f"Salesforce session status: {response.status_code}")
-            if hasattr(response, 'text'):
-                self.logger.error(f"Response text: {response.text[:500]}")
-            self.logger.error(f"Public access status: {public_response.status_code}")
-            if hasattr(public_response, 'text'):
-                self.logger.error(f"Public response text: {public_response.text[:500]}")
+            # Method 3: Try with various header combinations
+            headers_to_try = [
+                # Standard Salesforce session
+                {
+                    'Authorization': f'Bearer {self.sf.session_id}',
+                    'User-Agent': 'simple-salesforce/1.0',
+                    'Accept': '*/*'
+                },
+                # OAuth format
+                {
+                    'Authorization': f'OAuth {self.sf.session_id}',
+                    'User-Agent': 'Salesforce/1.0'
+                },
+                # Session ID in different formats
+                {
+                    'X-SFDC-Session': self.sf.session_id,
+                    'User-Agent': 'simple-salesforce/1.0'
+                }
+            ]
             
-            raise Exception(f"All download methods failed. Salesforce: {response.status_code}, Public: {public_response.status_code}")
+            for i, headers in enumerate(headers_to_try, 1):
+                try:
+                    self.logger.debug(f"Trying header combination {i}...")
+                    auth_response = requests.get(url, headers=headers, timeout=300)
+                    
+                    if auth_response.status_code == 200:
+                        content = auth_response.content
+                        size = len(content)
+                        
+                        if size > 0:
+                            self.logger.debug(f"✓ Header method {i} successful ({size} bytes)")
+                            
+                            # Check file size limits
+                            max_size_bytes = MIGRATION_CONFIG.get("max_file_size_mb", 100) * 1024 * 1024
+                            if size > max_size_bytes:
+                                raise ValueError(f"File size {size} bytes exceeds limit of {max_size_bytes} bytes")
+                            
+                            return content, size
+                            
+                except Exception as auth_error:
+                    self.logger.debug(f"Header method {i} failed: {auth_error}")
+                    continue
+            
+            # All methods failed - provide detailed error info
+            self.logger.error(f"❌ All download methods failed for: {url}")
+            
+            # Try one final diagnostic call to understand the error
+            try:
+                final_response = requests.get(url, timeout=30)
+                error_details = f"Status: {final_response.status_code}"
+                if final_response.text:
+                    error_details += f", Response: {final_response.text[:300]}"
+                self.logger.error(f"Diagnostic info: {error_details}")
+            except:
+                pass
+            
+            raise Exception(f"All download methods exhausted. URL may require special credentials or be inaccessible.")
             
         except Exception as e:
             raise Exception(f"Download failed: {e}")
     
-    def _try_content_document_download(self, doclist_entry_id: str, headers: dict) -> Optional[Tuple[bytes, int]]:
+    def _try_content_document_download(self, doclist_entry_id: str) -> Optional[Tuple[bytes, int]]:
         """Try downloading via ContentDocument API."""
         try:
             # Look for ContentDocumentLinks
@@ -591,6 +638,10 @@ class ChunkedBackupMigration:
                 version_id = content_result['records'][0]['ContentDocument']['LatestPublishedVersionId']
                 
                 # Try to download via ContentVersion
+                headers = {
+                    'Authorization': f'Bearer {self.sf.session_id}',
+                    'User-Agent': 'simple-salesforce/1.0'
+                }
                 version_url = f"{self.sf.base_url}sobjects/ContentVersion/{version_id}/VersionData"
                 version_response = requests.get(version_url, headers=headers, timeout=300)
                 
