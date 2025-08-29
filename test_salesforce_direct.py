@@ -168,9 +168,9 @@ def test_salesforce_direct():
     print(f"\n5️⃣ Testing PDF viewer page URLs...")
     
     viewer_urls = [
-        f"{sf.sf_instance}/lightning/n/TL_PDF_Editor",
-        f"{sf.sf_instance}/apex/TL_PDF_Editor", 
-        f"{sf.sf_instance}/apex/TL_DocumentManager"
+        f"https://{sf.sf_instance}/lightning/n/TL_PDF_Editor",
+        f"https://{sf.sf_instance}/apex/TL_PDF_Editor", 
+        f"https://{sf.sf_instance}/apex/TL_DocumentManager"
     ]
     
     for viewer_url in viewer_urls:
