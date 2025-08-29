@@ -193,7 +193,8 @@ class ChunkedBackupMigration:
             # Log top accounts
             for i, account in enumerate(accounts[:5]):
                 count = account.get('expr0', 0)  # Salesforce returns COUNT() as 'expr0'
-                self.logger.info(f"  {i+1}. {account['Account__r']['Name']}: {count} files")
+                account_name = account.get('Account__r', {}).get('Name', 'Unknown Account') if account.get('Account__r') else 'Unknown Account'
+                self.logger.info(f"  {i+1}. {account_name}: {count} files")
             
             return accounts
             
@@ -276,7 +277,7 @@ class ChunkedBackupMigration:
             
             for i, account in enumerate(accounts, 1):
                 account_id = account['Account__c']
-                account_name = account['Account__r']['Name']
+                account_name = account.get('Account__r', {}).get('Name', 'Unknown Account') if account.get('Account__r') else 'Unknown Account'
                 record_count = account.get('expr0', 0)  # COUNT() result
                 
                 self.logger.info("=" * 60)
