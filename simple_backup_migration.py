@@ -143,7 +143,7 @@ class SalesforceManager:
                 target_account_ids = [test_account_id]
                 self.logger.info(f"Filtering by Account ID: {test_account_id}")
             else:
-                # Get all accounts with DocListEntry__c records
+                # Get all accounts with DocListEntry__c records (using the working pattern from salesforce_s3_migration.py)
                 self.logger.info("Getting all accounts with DocListEntry__c records...")
                 accounts_query = """
                     SELECT DISTINCT Account__c, Account__r.Name
@@ -151,11 +151,10 @@ class SalesforceManager:
                     WHERE Account__c != NULL
                     AND IsDeleted = FALSE
                     AND Document__c != NULL
-                    ORDER BY Account__r.Name
                     LIMIT 200
                 """
                 
-                accounts_result = self.sf.query_all(accounts_query)
+                accounts_result = self.sf.query(accounts_query)
                 target_account_ids = [acc['Account__c'] for acc in accounts_result['records']]
                 
                 self.logger.info(f"Found {len(target_account_ids)} accounts with DocListEntry__c files")
@@ -196,7 +195,7 @@ class SalesforceManager:
                             'name': record['Name'],
                             'document_url': record['Document__c'],
                             'account_id': record['Account__c'],
-                            'account_name': record['Account__r']['Name'] if record.get('Account__r') else 'Unknown',
+                            'account_name': record['Account__r']['Name'],
                             'created_date': record['CreatedDate'],
                             'last_modified_date': record['LastModifiedDate']
                         }
