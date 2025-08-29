@@ -114,26 +114,41 @@ class BackupAnalyzer:
             
             self.logger.info(f"Found {len(accounts)} unique accounts")
             
-            # Step 3: Process files in optimized batches using OFFSET pagination
+            # Step 3: Use cursor-based pagination (no OFFSET limits)
             all_files = []
-            batch_size = 2000  # Maximum SOQL query limit
-            offset = 0
+            batch_size = 2000
+            last_id = None
+            batch_num = 0
+            total_batches = (total_records + batch_size - 1) // batch_size
             
-            self.logger.info("Processing files in optimized batches...")
+            self.logger.info("Processing files with cursor-based pagination...")
             
             while True:
-                # Use OFFSET for efficient pagination (faster than cursor-based)
-                files_query = f"""
-                    SELECT Id, Name, Document__c, Account__c, CreatedDate
-                    FROM DocListEntry__c
-                    WHERE IsDeleted = FALSE
-                    AND Document__c != NULL
-                    AND Type_Current__c = 'Document'
-                    AND Account__c != NULL
-                    ORDER BY Id
-                    LIMIT {batch_size}
-                    OFFSET {offset}
-                """
+                # Cursor-based pagination using WHERE Id > last_id
+                if last_id:
+                    files_query = f"""
+                        SELECT Id, Name, Document__c, Account__c, CreatedDate
+                        FROM DocListEntry__c
+                        WHERE IsDeleted = FALSE
+                        AND Document__c != NULL
+                        AND Type_Current__c = 'Document'
+                        AND Account__c != NULL
+                        AND Id > '{last_id}'
+                        ORDER BY Id
+                        LIMIT {batch_size}
+                    """
+                else:
+                    # First batch
+                    files_query = f"""
+                        SELECT Id, Name, Document__c, Account__c, CreatedDate
+                        FROM DocListEntry__c
+                        WHERE IsDeleted = FALSE
+                        AND Document__c != NULL
+                        AND Type_Current__c = 'Document'
+                        AND Account__c != NULL
+                        ORDER BY Id
+                        LIMIT {batch_size}
+                    """
                 
                 try:
                     batch_result = self.sf.query(files_query)
@@ -142,9 +157,7 @@ class BackupAnalyzer:
                     if not batch_records:
                         break  # No more records
                     
-                    # Process batch efficiently 
-                    batch_num = (offset // batch_size) + 1
-                    total_batches = (total_records + batch_size - 1) // batch_size
+                    batch_num += 1
                     self.logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch_records)} records)")
                     
                     # Convert records efficiently
@@ -160,7 +173,8 @@ class BackupAnalyzer:
                         }
                         all_files.append(file_info)
                     
-                    offset += batch_size
+                    # Update cursor to last ID in this batch
+                    last_id = batch_records[-1]['Id']
                     
                     # Progress update every 10 batches
                     if batch_num % 10 == 0:
@@ -170,9 +184,9 @@ class BackupAnalyzer:
                     
                 except SalesforceError as e:
                     self.logger.error(f"Error in batch {batch_num}: {e}")
-                    # Try to continue with next batch
-                    offset += batch_size
-                    continue
+                    # For cursor-based pagination, we can't easily skip, so break
+                    self.logger.error("Stopping due to cursor pagination error")
+                    break
             
             self.logger.info(f"Successfully processed {len(all_files):,} files from {len(accounts)} accounts")
             
