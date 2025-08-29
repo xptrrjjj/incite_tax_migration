@@ -269,7 +269,8 @@ class ChunkedBackupMigration:
                 if test_account_id:
                     accounts = [acc for acc in accounts if acc['Account__c'] == test_account_id]
                 elif test_account_name:
-                    accounts = [acc for acc in accounts if acc['Account__r']['Name'] == test_account_name]
+                    # Safely check account name
+                    accounts = [acc for acc in accounts if acc.get('Account__r', {}).get('Name', '') == test_account_name]
                 else:
                     accounts = accounts[:1]  # Just take first account
                 
