@@ -651,96 +651,129 @@ class ChunkedBackupMigration:
             raise Exception(f"Download failed: {e}")
     
     def _get_trackland_presigned_url(self, file_identifier: str, action: str = "read") -> Optional[str]:
-        """Generate pre-signed URL using Trackland API."""
-        try:
-            # Get Salesforce instance URL for API calls
-            org_url = self.sf.sf_instance
-            if org_url.endswith('.com/'):
-                org_url = org_url.rstrip('/')
-            
-            # Ensure URL has proper scheme
-            if not org_url.startswith('https://'):
-                org_url = f"https://{org_url}"
-            
-            # Trackland API endpoint for pre-signed URL generation
-            api_url = f"{org_url}/api/generate/presigned-url"
-            
-            # Prepare request payload based on discovered pattern
-            payload = {
-                "identifier": file_identifier,
-                "app": "pdf-editor-sf",  # App identifier from PDF viewer
-                "action": action  # "read" for download, "save-new-version" for upload
-            }
-            
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.sf.session_id}",
-                "User-Agent": "simple-salesforce/1.0"
-            }
-            
-            self.logger.info(f"Requesting pre-signed URL from: {api_url}")
-            self.logger.info(f"Payload: {payload}")
-            
-            response = requests.post(api_url, json=payload, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
-                result = response.json()
-                presigned_url = result.get('data', {}).get('url')
-                
-                if presigned_url:
-                    self.logger.info(f"✓ Got pre-signed URL: {presigned_url[:50]}...")
-                    return presigned_url
+        """Generate pre-signed URL using Trackland API - try multiple base URLs."""
+        # Try different possible API base URLs since the main org URL returns 404
+        potential_base_urls = [
+            # Original org URL
+            self.sf.sf_instance,
+            # Possible Trackland-specific subdomains
+            "trackland-api.herokuapp.com",
+            "api.trackland.com", 
+            f"trackland-{self.sf.sf_instance.split('.')[0].replace('https://', '')}.herokuapp.com",
+            # Alternative patterns
+            f"api-{self.sf.sf_instance.split('.')[0].replace('https://', '')}.trackland.com"
+        ]
+        
+        for base_url in potential_base_urls:
+            try:
+                # Ensure URL has proper scheme
+                if not base_url.startswith('https://'):
+                    org_url = f"https://{base_url}"
                 else:
-                    self.logger.info(f"No URL in response: {result}")
-            else:
-                self.logger.info(f"Pre-signed URL API returned status {response.status_code}: {response.text[:300]}")
-            
-            return None
-            
-        except Exception as e:
-            self.logger.info(f"Pre-signed URL generation failed: {e}")
-            return None
+                    org_url = base_url
+                    
+                if org_url.endswith('.com/'):
+                    org_url = org_url.rstrip('/')
+                
+                # Trackland API endpoint for pre-signed URL generation
+                api_url = f"{org_url}/api/generate/presigned-url"
+                
+                # Prepare request payload based on discovered pattern
+                payload = {
+                    "identifier": file_identifier,
+                    "app": "pdf-editor-sf",  # App identifier from PDF viewer
+                    "action": action  # "read" for download, "save-new-version" for upload
+                }
+                
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.sf.session_id}",
+                    "User-Agent": "simple-salesforce/1.0"
+                }
+                
+                self.logger.info(f"Trying API base URL: {api_url}")
+                
+                response = requests.post(api_url, json=payload, headers=headers, timeout=10)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    presigned_url = result.get('data', {}).get('url')
+                    
+                    if presigned_url:
+                        self.logger.info(f"✓ Found working API at {org_url}")
+                        self.logger.info(f"✓ Got pre-signed URL: {presigned_url[:50]}...")
+                        return presigned_url
+                    else:
+                        self.logger.info(f"No URL in response from {org_url}: {result}")
+                elif response.status_code == 404:
+                    self.logger.info(f"API not found at {org_url} (404)")
+                else:
+                    self.logger.info(f"API at {org_url} returned status {response.status_code}: {response.text[:200]}")
+                        
+            except Exception as e:
+                self.logger.info(f"Failed to connect to {base_url}: {e}")
+                continue
+        
+        self.logger.info("No working API base URL found for pre-signed URLs")
+        return None
     
     def _try_trackland_document_api(self, file_identifier: str) -> Optional[Tuple[bytes, int]]:
-        """Try downloading via Trackland document versions API."""
-        try:
-            # Get Salesforce instance URL
-            org_url = self.sf.sf_instance
-            if org_url.endswith('.com/'):
-                org_url = org_url.rstrip('/')
-            
-            # Ensure URL has proper scheme
-            if not org_url.startswith('https://'):
-                org_url = f"https://{org_url}"
-            
-            # Try document versions API endpoint
-            api_url = f"{org_url}/api/document/versions/{file_identifier}"
-            
-            headers = {
-                "Authorization": f"Bearer {self.sf.session_id}",
-                "User-Agent": "simple-salesforce/1.0",
-                "Accept": "application/octet-stream"
-            }
-            
-            self.logger.info(f"Trying document API: {api_url}")
-            
-            response = requests.get(api_url, headers=headers, timeout=300)
-            
-            if response.status_code == 200:
-                content = response.content
-                size = len(content)
+        """Try downloading via Trackland document versions API - try multiple base URLs."""
+        # Try different possible API base URLs since the main org URL returns 404
+        potential_base_urls = [
+            # Original org URL
+            self.sf.sf_instance,
+            # Possible Trackland-specific subdomains
+            "trackland-api.herokuapp.com",
+            "api.trackland.com", 
+            f"trackland-{self.sf.sf_instance.split('.')[0].replace('https://', '')}.herokuapp.com",
+            # Alternative patterns
+            f"api-{self.sf.sf_instance.split('.')[0].replace('https://', '')}.trackland.com"
+        ]
+        
+        for base_url in potential_base_urls:
+            try:
+                # Ensure URL has proper scheme
+                if not base_url.startswith('https://'):
+                    org_url = f"https://{base_url}"
+                else:
+                    org_url = base_url
+                    
+                if org_url.endswith('.com/'):
+                    org_url = org_url.rstrip('/')
                 
-                if size > 0:
-                    self.logger.info(f"Document API successful ({size} bytes)")
-                    return content, size
-            else:
-                self.logger.info(f"Document API returned status {response.status_code}")
-            
-            return None
-            
-        except Exception as e:
-            self.logger.info(f"Trackland document API failed: {e}")
-            return None
+                # Try document versions API endpoint
+                api_url = f"{org_url}/api/document/versions/{file_identifier}"
+                
+                headers = {
+                    "Authorization": f"Bearer {self.sf.session_id}",
+                    "User-Agent": "simple-salesforce/1.0",
+                    "Accept": "application/octet-stream"
+                }
+                
+                self.logger.info(f"Trying document API: {api_url}")
+                
+                response = requests.get(api_url, headers=headers, timeout=30)
+                
+                if response.status_code == 200:
+                    content = response.content
+                    size = len(content)
+                    
+                    if size > 0:
+                        self.logger.info(f"✓ Found working document API at {org_url}")
+                        self.logger.info(f"Document API successful ({size} bytes)")
+                        return content, size
+                elif response.status_code == 404:
+                    self.logger.info(f"Document API not found at {org_url} (404)")
+                else:
+                    self.logger.info(f"Document API at {org_url} returned status {response.status_code}: {response.text[:200]}")
+                        
+            except Exception as e:
+                self.logger.info(f"Failed to connect to {base_url}: {e}")
+                continue
+        
+        self.logger.info("No working document API base URL found")
+        return None
     
     def _try_content_document_download(self, doclist_entry_id: str) -> Optional[Tuple[bytes, int]]:
         """Try downloading via ContentDocument API."""
