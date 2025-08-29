@@ -102,7 +102,16 @@ class BackupAnalyzer:
             """
             
             account_result = self.sf.query(account_query)
-            accounts = {r['Account__c']: r['Account__r']['Name'] for r in account_result['records']}
+            accounts = {}
+            for r in account_result['records']:
+                account_id = r['Account__c']
+                # Handle missing Account__r relationship safely
+                if r.get('Account__r') and r['Account__r'].get('Name'):
+                    account_name = r['Account__r']['Name']
+                else:
+                    account_name = f"Account_{account_id}"
+                accounts[account_id] = account_name
+            
             self.logger.info(f"Found {len(accounts)} unique accounts")
             
             # Step 3: Process files in optimized batches using OFFSET pagination
