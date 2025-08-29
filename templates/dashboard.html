@@ -425,9 +425,21 @@
         }
         
         function populateData(data) {
-            // Update phase status
-            document.getElementById('current-phase').textContent = data.phase_status.current_phase;
-            document.getElementById('phase-description').textContent = data.phase_status.status_description;
+            // Update phase status with running indicator
+            const phaseElement = document.getElementById('current-phase');
+            const descElement = document.getElementById('phase-description');
+            
+            phaseElement.textContent = data.phase_status.current_phase;
+            descElement.textContent = data.phase_status.status_description;
+            
+            // Update header status indicator
+            const statusIndicator = document.querySelector('.status-indicator');
+            if (data.phase_status.is_running) {
+                statusIndicator.className = 'status-indicator running';
+                descElement.innerHTML = data.phase_status.status_description + ' <span style="color: #27ae60;">●</span>';
+            } else {
+                statusIndicator.className = 'status-indicator complete';
+            }
             
             // Update overview stats
             document.getElementById('total-files').textContent = formatNumber(data.overview.total_files);
@@ -437,13 +449,25 @@
             document.getElementById('total-size').textContent = data.overview.total_size_gb;
             
             // Update progress bars
-            const backupProgress = data.phase_status.backup_progress || 0;
-            const migrationProgress = data.phase_status.migration_progress || 0;
+            let backupProgress = data.phase_status.backup_progress || 0;
+            let migrationProgress = data.phase_status.migration_progress || 0;
+            
+            // Cap progress if migration is running to prevent showing 100% when not done
+            if (data.phase_status.is_running) {
+                backupProgress = Math.min(backupProgress, 95);
+                migrationProgress = Math.min(migrationProgress, 95);
+            }
             
             document.getElementById('backup-progress').style.width = backupProgress + '%';
-            document.getElementById('backup-progress-text').textContent = backupProgress.toFixed(1) + '%';
-            
             document.getElementById('migration-progress').style.width = migrationProgress + '%';
+            
+            // Update progress text with running indicator
+            if (data.phase_status.is_running && backupProgress > 0) {
+                document.getElementById('backup-progress-text').textContent = backupProgress.toFixed(1) + '% (Running...)';
+            } else {
+                document.getElementById('backup-progress-text').textContent = backupProgress.toFixed(1) + '%';
+            }
+            
             document.getElementById('migration-progress-text').textContent = migrationProgress.toFixed(1) + '%';
             
             // Update recent runs

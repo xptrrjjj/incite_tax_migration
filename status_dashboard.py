@@ -122,7 +122,7 @@ class StatusDashboard:
         }
     
     def _get_recent_runs(self, db):
-        """Get recent migration runs."""
+        """Get recent migration runs with improved formatting."""
         cursor = db.conn.execute('''
             SELECT * FROM migration_runs 
             ORDER BY start_time DESC 
@@ -133,21 +133,56 @@ class StatusDashboard:
         for row in cursor.fetchall():
             run_data = dict(row)
             
-            # Calculate duration
-            if run_data['end_time']:
+            # Ensure data integrity and prevent corruption
+            run_data['run_type'] = run_data.get('run_type', 'unknown') or 'unknown'
+            run_data['status'] = run_data.get('status', 'unknown') or 'unknown'
+            run_data['successful_files'] = run_data.get('successful_files', 0) or 0
+            run_data['failed_files'] = run_data.get('failed_files', 0) or 0
+            run_data['total_files'] = run_data.get('total_files', 0) or 0
+            
+            # Calculate duration with better formatting
+            if run_data.get('end_time'):
                 try:
-                    start = datetime.fromisoformat(run_data['start_time'])
-                    end = datetime.fromisoformat(run_data['end_time'])
-                    run_data['duration'] = str(end - start).split('.')[0]
-                except:
+                    start = datetime.fromisoformat(str(run_data['start_time']))
+                    end = datetime.fromisoformat(str(run_data['end_time']))
+                    duration = end - start
+                    
+                    # Format duration nicely
+                    total_seconds = int(duration.total_seconds())
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    seconds = total_seconds % 60
+                    
+                    if hours > 0:
+                        run_data['duration'] = f"{hours}h {minutes}m {seconds}s"
+                    elif minutes > 0:
+                        run_data['duration'] = f"{minutes}m {seconds}s"
+                    else:
+                        run_data['duration'] = f"{seconds}s"
+                        
+                except Exception as e:
                     run_data['duration'] = 'Unknown'
             else:
-                if run_data['status'] == 'running':
+                if run_data['status'] == 'running' and run_data.get('start_time'):
                     try:
-                        start = datetime.fromisoformat(run_data['start_time'])
+                        start = datetime.fromisoformat(str(run_data['start_time']))
                         now = datetime.now()
-                        run_data['duration'] = f"Running for {str(now - start).split('.')[0]}"
-                    except:
+                        duration = now - start
+                        
+                        # Format running duration
+                        total_seconds = int(duration.total_seconds())
+                        days = total_seconds // 86400
+                        hours = (total_seconds % 86400) // 3600
+                        minutes = (total_seconds % 3600) // 60
+                        
+                        if days > 0:
+                            run_data['duration'] = f"Running for {days}d {hours}h {minutes}m"
+                        elif hours > 0:
+                            run_data['duration'] = f"Running for {hours}h {minutes}m"
+                        else:
+                            run_data['duration'] = f"Running for {minutes}m"
+                            
+                    except Exception as e:
                         run_data['duration'] = 'Running...'
                 else:
                     run_data['duration'] = 'Unknown'
@@ -174,29 +209,46 @@ class StatusDashboard:
                 for row in cursor.fetchall()]
     
     def _get_top_accounts(self, db):
-        """Get top accounts by file count."""
+        """Get top accounts by file count with data integrity checks."""
         cursor = db.conn.execute('''
             SELECT 
-                account_name,
+                COALESCE(account_name, 'Unknown') as account_name,
                 COUNT(*) as file_count,
-                SUM(file_size_bytes) as total_size,
+                COALESCE(SUM(file_size_bytes), 0) as total_size,
                 SUM(CASE WHEN salesforce_updated = 1 THEN 1 ELSE 0 END) as migrated_count
             FROM file_migrations
+            WHERE account_name IS NOT NULL 
+            AND account_name != ''
             GROUP BY account_id, account_name
+            HAVING file_count > 0
             ORDER BY file_count DESC
             LIMIT 10
         ''')
         
         accounts = []
         for row in cursor.fetchall():
-            total_size_bytes = row[2] or 0
-            total_size_mb = round(total_size_bytes / (1024**2), 1) if total_size_bytes else 0
+            # Safely handle data conversion with fallbacks
+            account_name = str(row[0]) if row[0] else 'Unknown'
+            file_count = int(row[1]) if row[1] and str(row[1]).isdigit() else 0
+            total_size_bytes = float(row[2]) if row[2] and str(row[2]).replace('.','').isdigit() else 0
+            migrated_count = int(row[3]) if row[3] and str(row[3]).isdigit() else 0
+            
+            # Convert bytes to MB safely
+            try:
+                total_size_mb = round(total_size_bytes / (1024**2), 1) if total_size_bytes > 0 else 0
+            except:
+                total_size_mb = 0
+            
+            # Clean account name to prevent corruption
+            clean_name = ''.join(char for char in account_name if ord(char) < 128)[:50]  # ASCII only, max 50 chars
+            if not clean_name.strip():
+                clean_name = 'Unknown'
             
             accounts.append({
-                'name': row[0] or 'Unknown',
-                'file_count': row[1] or 0,
+                'name': clean_name,
+                'file_count': file_count,
                 'total_size_mb': total_size_mb,
-                'migrated_count': row[3] or 0
+                'migrated_count': migrated_count
             })
         
         return accounts
@@ -221,40 +273,81 @@ class StatusDashboard:
             }
     
     def _get_phase_status(self, db):
-        """Get migration phase status."""
+        """Get migration phase status with proper progress calculation."""
         stats = db.get_migration_stats()
         file_stats = stats['files']
         
-        total_files = file_stats.get('total_files', 0)
-        backup_only = file_stats.get('backup_only', 0)
-        fully_migrated = file_stats.get('fully_migrated', 0)
+        total_files = file_stats.get('total_files', 0) or 0
+        backup_only = file_stats.get('backup_only', 0) or 0
+        fully_migrated = file_stats.get('fully_migrated', 0) or 0
         
-        if total_files == 0:
+        # Check if there's a currently running migration
+        cursor = db.conn.execute('''
+            SELECT COUNT(*), SUM(successful_files), SUM(failed_files), SUM(total_files)
+            FROM migration_runs 
+            WHERE status = 'running'
+        ''')
+        
+        running_data = cursor.fetchone()
+        is_running = running_data and running_data[0] > 0
+        
+        # Get total expected files from Salesforce (more accurate than just backed up files)
+        try:
+            cursor = db.conn.execute('''
+                SELECT COUNT(DISTINCT doclist_entry_id) 
+                FROM file_migrations 
+            ''')
+            actual_discovered_files = cursor.fetchone()[0] or 0
+        except:
+            actual_discovered_files = total_files
+        
+        # Determine phase and status
+        if total_files == 0 and actual_discovered_files == 0:
             phase = "Not Started"
             status = "No migration data found"
+            backup_progress = 0
+            migration_progress = 0
         elif backup_only > 0 and fully_migrated == 0:
-            phase = "Phase 1 (Backup Only)"
-            status = f"{backup_only:,} files backed up"
+            if is_running:
+                phase = "Phase 1 (Backup Only) - RUNNING"
+                status = f"Actively backing up files... ({backup_only:,} files backed up so far)"
+                # Don't show 100% if migration is running
+                # Use a more conservative progress calculation
+                estimated_total = max(actual_discovered_files, backup_only * 1.2)  # Assume 20% more to discover
+                backup_progress = min(95.0, round((backup_only / estimated_total) * 100, 1)) if estimated_total > 0 else 0
+            else:
+                phase = "Phase 1 (Backup Only) - COMPLETE"
+                status = f"{backup_only:,} files backed up and ready for migration"
+                backup_progress = 100.0
+            migration_progress = 0
         elif fully_migrated > 0:
             phase = "Phase 2 (Full Migration)"
-            status = f"{fully_migrated:,} files fully migrated"
+            status = f"{fully_migrated:,} files fully migrated, {backup_only:,} backup-only"
+            # Only show 100% if no migration is running
+            if actual_discovered_files > 0:
+                backup_progress = round((backup_only / actual_discovered_files) * 100, 1)
+                migration_progress = round((fully_migrated / actual_discovered_files) * 100, 1)
+            else:
+                backup_progress = 100.0 if backup_only > 0 else 0
+                migration_progress = 100.0 if fully_migrated > 0 else 0
         else:
             phase = "Unknown"
-            status = "Unable to determine status"
+            status = "Unable to determine migration status"
+            backup_progress = 0
+            migration_progress = 0
         
-        # Safely calculate progress percentages
-        backup_progress = 0
-        migration_progress = 0
-        
-        if total_files and total_files > 0:
-            backup_progress = round((backup_only / total_files) * 100, 1)
-            migration_progress = round((fully_migrated / total_files) * 100, 1)
+        # Cap progress at reasonable levels if migration is running
+        if is_running:
+            backup_progress = min(backup_progress, 95.0)
+            migration_progress = min(migration_progress, 95.0)
         
         return {
             'current_phase': phase,
             'status_description': status,
-            'backup_progress': backup_progress,
-            'migration_progress': migration_progress
+            'backup_progress': max(0, backup_progress),
+            'migration_progress': max(0, migration_progress),
+            'is_running': is_running,
+            'actual_discovered_files': actual_discovered_files
         }
 
 # Global dashboard instance
