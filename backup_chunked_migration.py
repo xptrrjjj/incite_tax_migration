@@ -24,6 +24,7 @@ import sys
 import argparse
 import logging
 import traceback
+import json
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
@@ -778,35 +779,69 @@ class ChunkedBackupMigration:
             }
         ]
         
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.sf.session_id}",
-            "User-Agent": "simple-salesforce/1.0"
-        }
+        # Try different header combinations with proper encoding
+        header_combinations = [
+            # Standard with UTF-8 encoding
+            {
+                "Content-Type": "application/json; charset=utf-8",
+                "Authorization": f"Bearer {self.sf.session_id}",
+                "User-Agent": "simple-salesforce/1.0",
+                "Accept": "application/json"
+            },
+            # Alternative authorization format
+            {
+                "Content-Type": "application/json; charset=utf-8",
+                "X-Auth-Token": self.sf.session_id,
+                "User-Agent": "simple-salesforce/1.0",
+                "Accept": "application/json"
+            },
+            # Session cookie format
+            {
+                "Content-Type": "application/json; charset=utf-8",
+                "Cookie": f"sid={self.sf.session_id}",
+                "User-Agent": "simple-salesforce/1.0",
+                "Accept": "application/json"
+            },
+            # No authorization (test if endpoint is public)
+            {
+                "Content-Type": "application/json; charset=utf-8",
+                "User-Agent": "simple-salesforce/1.0",
+                "Accept": "application/json"
+            }
+        ]
         
         for i, payload in enumerate(payload_formats, 1):
-            try:
-                self.logger.info(f"Trying payload format {i}: {api_url}")
-                self.logger.info(f"Payload: {payload}")
-                
-                response = requests.post(api_url, json=payload, headers=headers, timeout=10)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    presigned_url = result.get('data', {}).get('url') or result.get('url') or result.get('presignedUrl')
+            for j, headers in enumerate(header_combinations, 1):
+                try:
+                    self.logger.info(f"Trying payload format {i} with headers {j}: {api_url}")
+                    self.logger.info(f"Payload: {payload}")
                     
-                    if presigned_url:
-                        self.logger.info(f"✓ Found working payload format {i}!")
-                        self.logger.info(f"✓ Got pre-signed URL: {presigned_url[:50]}...")
-                        return presigned_url
-                    else:
-                        self.logger.info(f"No URL in response with format {i}: {result}")
-                else:
-                    self.logger.info(f"Format {i} returned status {response.status_code}: {response.text[:200]}")
+                    # Ensure proper JSON encoding
+                    json_data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                    
+                    response = requests.post(
+                        api_url, 
+                        data=json_data, 
+                        headers=headers, 
+                        timeout=10
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        presigned_url = result.get('data', {}).get('url') or result.get('url') or result.get('presignedUrl')
                         
-            except Exception as e:
-                self.logger.info(f"Payload format {i} failed: {e}")
-                continue
+                        if presigned_url:
+                            self.logger.info(f"✓ Found working combination: payload {i}, headers {j}!")
+                            self.logger.info(f"✓ Got pre-signed URL: {presigned_url[:50]}...")
+                            return presigned_url
+                        else:
+                            self.logger.info(f"No URL in response with P{i}H{j}: {result}")
+                    else:
+                        self.logger.info(f"P{i}H{j} returned status {response.status_code}: {response.text[:100]}")
+                            
+                except Exception as e:
+                    self.logger.info(f"P{i}H{j} failed: {e}")
+                    continue
         
         self.logger.info("No working payload format found for pre-signed URLs")
         return None
