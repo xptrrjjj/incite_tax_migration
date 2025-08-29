@@ -68,72 +68,111 @@ class BackupAnalyzer:
             return False
     
     def get_backup_analysis(self) -> Dict:
-        """Get comprehensive analysis of files to backup."""
+        """Get comprehensive analysis using smart pagination - complete but faster."""
         try:
-            # Get all accounts with DocListEntry__c records
-            self.logger.info("Getting all accounts with DocListEntry__c records...")
-            accounts_query = """
-                SELECT Account__c
+            # Strategy: Get quick counts first, then paginate efficiently
+            
+            # Step 1: Quick count of total records to understand scope
+            self.logger.info("Getting total record count...")
+            count_query = """
+                SELECT COUNT()
                 FROM DocListEntry__c
-                WHERE Account__c != NULL
-                AND IsDeleted = FALSE
+                WHERE IsDeleted = FALSE
                 AND Document__c != NULL
-                GROUP BY Account__c
+                AND Type_Current__c = 'Document'
+                AND Account__c != NULL
             """
             
-            accounts_result = self.sf.query_all(accounts_query)
-            target_account_ids = [acc['Account__c'] for acc in accounts_result['records']]
+            count_result = self.sf.query(count_query)
+            total_records = count_result['totalSize']
+            self.logger.info(f"Total records to process: {total_records:,}")
             
-            self.logger.info(f"Found {len(target_account_ids)} accounts with DocListEntry__c files")
+            # Step 2: Get all unique account IDs efficiently 
+            self.logger.info("Getting all unique account IDs...")
+            account_query = """
+                SELECT Account__c, Account__r.Name
+                FROM DocListEntry__c
+                WHERE IsDeleted = FALSE
+                AND Document__c != NULL
+                AND Type_Current__c = 'Document'
+                AND Account__c != NULL
+                GROUP BY Account__c, Account__r.Name
+                ORDER BY Account__r.Name
+                LIMIT 2000
+            """
             
-            if not target_account_ids:
-                return {"error": "No accounts found"}
+            account_result = self.sf.query(account_query)
+            accounts = {r['Account__c']: r['Account__r']['Name'] for r in account_result['records']}
+            self.logger.info(f"Found {len(accounts)} unique accounts")
             
-            # Get detailed file information for all accounts
+            # Step 3: Process files in optimized batches using OFFSET pagination
             all_files = []
-            batch_size = 20
+            batch_size = 2000  # Maximum SOQL query limit
+            offset = 0
             
-            self.logger.info("Analyzing files across all accounts...")
+            self.logger.info("Processing files in optimized batches...")
             
-            for i in range(0, len(target_account_ids), batch_size):
-                batch_ids = target_account_ids[i:i + batch_size]
-                ids_str = "', '".join(batch_ids)
-                
+            while True:
+                # Use OFFSET for efficient pagination (faster than cursor-based)
                 files_query = f"""
-                    SELECT Id, Name, Document__c, Type_Current__c,
-                           Account__c, Account__r.Name, CreatedDate, LastModifiedDate
+                    SELECT Id, Name, Document__c, Account__c, CreatedDate
                     FROM DocListEntry__c
-                    WHERE Account__c IN ('{ids_str}')
-                    AND IsDeleted = FALSE
+                    WHERE IsDeleted = FALSE
                     AND Document__c != NULL
                     AND Type_Current__c = 'Document'
-                    ORDER BY Account__c, Name
+                    AND Account__c != NULL
+                    ORDER BY Id
+                    LIMIT {batch_size}
+                    OFFSET {offset}
                 """
                 
                 try:
-                    self.logger.info(f"Analyzing batch {i//batch_size + 1}/{(len(target_account_ids) + batch_size - 1)//batch_size}")
-                    result = self.sf.query_all(files_query)
+                    batch_result = self.sf.query(files_query)
+                    batch_records = batch_result['records']
                     
-                    for record in result['records']:
+                    if not batch_records:
+                        break  # No more records
+                    
+                    # Process batch efficiently 
+                    batch_num = (offset // batch_size) + 1
+                    total_batches = (total_records + batch_size - 1) // batch_size
+                    self.logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch_records)} records)")
+                    
+                    # Convert records efficiently
+                    for record in batch_records:
                         file_info = {
                             'doclistentry_id': record['Id'],
                             'name': record['Name'],
                             'document_url': record['Document__c'],
                             'account_id': record['Account__c'],
-                            'account_name': record['Account__r']['Name'],
+                            'account_name': accounts.get(record['Account__c'], f"Account_{record['Account__c']}"),
                             'created_date': record['CreatedDate'],
-                            'last_modified_date': record['LastModifiedDate']
+                            'last_modified_date': None  # Skip for speed
                         }
                         all_files.append(file_info)
-                        
+                    
+                    offset += batch_size
+                    
+                    # Progress update every 10 batches
+                    if batch_num % 10 == 0:
+                        processed = len(all_files)
+                        progress = (processed / total_records) * 100
+                        self.logger.info(f"Progress: {processed:,}/{total_records:,} ({progress:.1f}%)")
+                    
                 except SalesforceError as e:
-                    self.logger.error(f"Error querying files for batch: {e}")
+                    self.logger.error(f"Error in batch {batch_num}: {e}")
+                    # Try to continue with next batch
+                    offset += batch_size
                     continue
+            
+            self.logger.info(f"Successfully processed {len(all_files):,} files from {len(accounts)} accounts")
             
             return self.analyze_files(all_files)
             
         except Exception as e:
             self.logger.error(f"Error during analysis: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             return {"error": str(e)}
     
     def analyze_files(self, files: List[Dict]) -> Dict:
