@@ -283,7 +283,7 @@ class StatusDashboard:
         
         # Check if there's a currently running migration
         cursor = db.conn.execute('''
-            SELECT COUNT(*), SUM(successful_files), SUM(failed_files), SUM(total_files)
+            SELECT COUNT(*), SUM(successful_files), SUM(failed_files), SUM(total_files_processed)
             FROM migration_runs 
             WHERE status = 'running'
         ''')
