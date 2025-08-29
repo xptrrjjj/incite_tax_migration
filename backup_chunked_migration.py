@@ -408,7 +408,14 @@ class ChunkedBackupMigration:
         for i, record in enumerate(records, 1):
             try:
                 context = f"{account_context} - " if account_context else ""
-                self.logger.info(f"📄 {context}Processing file {i}/{len(records)}: {record.get('Name', record['Id'])}")
+                file_name = record.get('Name', record['Id'])
+                
+                # Log file with extension info for debugging
+                if '.' in file_name:
+                    file_ext = file_name.split('.')[-1].lower()
+                    self.logger.info(f"📄 {context}Processing file {i}/{len(records)}: {file_name} [.{file_ext}]")
+                else:
+                    self.logger.info(f"📄 {context}Processing file {i}/{len(records)}: {file_name} [no extension]")
                 
                 success = self.process_single_file(record)
                 if success:
@@ -519,6 +526,11 @@ class ChunkedBackupMigration:
             }
             
             self.logger.debug(f"Attempting download with Salesforce session: {url}")
+            
+            # Check if this is a trackland URL (we should only process trackland files)
+            if 'trackland-doc-storage' not in url:
+                self.logger.warning(f"Skipping non-trackland URL: {url}")
+                raise Exception(f"Not a trackland-doc-storage URL: {url}")
             response = requests.get(url, headers=headers, timeout=300)
             
             if response.status_code == 200:
@@ -549,8 +561,16 @@ class ChunkedBackupMigration:
                 self.logger.debug(f"Successfully downloaded via public access ({size} bytes)")
                 return content, size
             
-            # If all methods fail
-            raise Exception(f"All download methods failed. Status: {response.status_code}")
+            # If all methods fail, log detailed error info
+            self.logger.error(f"All download methods failed for URL: {url}")
+            self.logger.error(f"Salesforce session status: {response.status_code}")
+            if hasattr(response, 'text'):
+                self.logger.error(f"Response text: {response.text[:500]}")
+            self.logger.error(f"Public access status: {public_response.status_code}")
+            if hasattr(public_response, 'text'):
+                self.logger.error(f"Public response text: {public_response.text[:500]}")
+            
+            raise Exception(f"All download methods failed. Salesforce: {response.status_code}, Public: {public_response.status_code}")
             
         except Exception as e:
             raise Exception(f"Download failed: {e}")
