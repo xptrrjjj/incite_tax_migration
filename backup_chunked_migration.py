@@ -554,11 +554,8 @@ class ChunkedBackupMigration:
             
             # Method 1: Try Trackland API pre-signed URL generation
             try:
-                # Try different actions that might work for reading files
-                presigned_url = self._get_trackland_presigned_url(file_identifier, "read")
-                if not presigned_url:
-                    # Try with different action if "read" doesn't work
-                    presigned_url = self._get_trackland_presigned_url(file_identifier, "get-file")
+                # Use the working API approach discovered from browser inspection
+                presigned_url = self._get_trackland_presigned_url(file_identifier, doclist_entry_id)
                 
                 if presigned_url:
                     self.logger.info(f"✓ Got pre-signed URL from Trackland API: {presigned_url[:100]}...")
@@ -747,155 +744,78 @@ class ChunkedBackupMigration:
         except Exception as e:
             raise Exception(f"Download failed: {e}")
     
-    def _get_trackland_presigned_url(self, file_identifier: str, action: str = "read") -> Optional[str]:
-        """Generate pre-signed URL using discovered Trackland API endpoint."""
-        # Use the discovered working endpoint
-        api_url = "https://incitetax.trackland.com/api/generate/presigned-url"
+    def _get_trackland_presigned_url(self, file_identifier: str, doclist_id: str) -> Optional[str]:
+        """Generate pre-signed URL using the working Trackland API endpoint."""
         
-        # Try different payload formats and request methods based on errors
+        # Use the actual working API endpoint discovered from browser inspection
+        api_url = f"https://incitetax.api.trackland.com/api/generate/presigned-url/{file_identifier}"
         
-        # Try GET request first (many APIs use GET for reading)
-        get_urls = [
-            f"https://incitetax.trackland.com/api/generate/presigned-url?identifier={file_identifier}&action={action}",
-            f"https://incitetax.trackland.com/api/generate/presigned-url?identifier={file_identifier}&app=pdf-editor-sf&action={action}",
-            f"https://incitetax.trackland.com/api/document/versions/{file_identifier}",
-            f"https://incitetax.trackland.com/api/files/{file_identifier}/download"
-        ]
+        # Get current user info for the API payload
+        try:
+            user_info = self.sf.query(f"SELECT Id FROM User WHERE Username = '{SALESFORCE_CONFIG['username']}'")
+            if user_info['records']:
+                user_id = user_info['records'][0]['Id']
+            else:
+                self.logger.warning(f"Could not get user ID, using placeholder")
+                user_id = "005UU00000220KXYAY"  # Fallback from original curl
+        except Exception as e:
+            self.logger.warning(f"Error getting user ID: {e}, using placeholder")
+            user_id = "005UU00000220KXYAY"
         
-        payload_formats = [
-            # Format 1: Exact JS pattern from PDF viewer
-            {
-                "identifier": file_identifier,
-                "app": "pdf-editor-sf",
-                "action": "save-new-version" if action == "read" else action  # Use original action from JS
+        # Headers from the working browser request
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-US,en;q=0.9", 
+            "authorization": "Bearer U2FsdGVkX1+v3DTrAXS/6wknJyOFMGwOV7/N3fDyarBNOi2R77zRFfpq3WiWIiMMYa06xq8zsFuSc5xC+pNh10ax7jCyF4cpLVrobwkFUjFfSSwjlKqNxEm2rCwNMqZYoRlirbv0oDRNGwmow8gw/w==",
+            "content-type": "application/json",
+            "origin": "https://incitetax.lightning.force.com",
+            "referer": "https://incitetax.lightning.force.com/",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+        }
+        
+        # Payload from the working browser request
+        payload = {
+            "id": doclist_id,
+            "type_current": "Document",
+            "metadata": {
+                "user": user_id,
+                "app": "doctree",
+                "platform": "salesforce",
+                "action": "download"
             },
-            # Format 2: Array format (since API expects iterable)
-            {
-                "identifiers": [file_identifier],  # Array format
-                "app": "pdf-editor-sf",
-                "action": action
-            },
-            # Format 3: Alternative actions from JS
-            {
-                "identifier": file_identifier,
-                "app": "pdf-editor-sf", 
-                "action": "get-file"
-            },
-            # Format 4: Document API format
-            {
-                "fileId": file_identifier,
-                "type": "download"
-            },
-            # Format 5: Simple identifier only
-            {
-                "identifier": file_identifier
+            "version": "FIRST",
+            "track": {
+                "name": "TL_Notification_Glacier_Restoration",
+                "inputs": {
+                    "UserId": [user_id],
+                    "DocListEntryId": doclist_id
+                }
             }
-        ]
+        }
         
-        # Try different header combinations with proper encoding
-        header_combinations = [
-            # Standard with UTF-8 encoding
-            {
-                "Content-Type": "application/json; charset=utf-8",
-                "Authorization": f"Bearer {self.sf.session_id}",
-                "User-Agent": "simple-salesforce/1.0",
-                "Accept": "application/json"
-            },
-            # Alternative authorization format
-            {
-                "Content-Type": "application/json; charset=utf-8",
-                "X-Auth-Token": self.sf.session_id,
-                "User-Agent": "simple-salesforce/1.0",
-                "Accept": "application/json"
-            },
-            # Session cookie format
-            {
-                "Content-Type": "application/json; charset=utf-8",
-                "Cookie": f"sid={self.sf.session_id}",
-                "User-Agent": "simple-salesforce/1.0",
-                "Accept": "application/json"
-            },
-            # No authorization (test if endpoint is public)
-            {
-                "Content-Type": "application/json; charset=utf-8",
-                "User-Agent": "simple-salesforce/1.0",
-                "Accept": "application/json"
-            }
-        ]
-        
-        # First try GET requests (common for reading operations)
-        for i, get_url in enumerate(get_urls, 1):
-            for j, headers in enumerate(header_combinations, 1):
+        try:
+            self.logger.info(f"Requesting pre-signed URL from Trackland API for {file_identifier}")
+            response = requests.post(api_url, json=payload, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
                 try:
-                    self.logger.info(f"Trying GET request {i} with headers {j}: {get_url[:60]}...")
+                    result = response.json()
+                    presigned_url = result.get('data', {}).get('url')
                     
-                    response = requests.get(get_url, headers=headers, timeout=10)
-                    
-                    if response.status_code == 200:
-                        # Try to parse as JSON first
-                        try:
-                            result = response.json()
-                            presigned_url = result.get('data', {}).get('url') or result.get('url') or result.get('presignedUrl') or result.get('downloadUrl')
-                            
-                            if presigned_url:
-                                self.logger.info(f"✓ Found working GET: G{i}H{j}!")
-                                self.logger.info(f"✓ Got pre-signed URL: {presigned_url[:50]}...")
-                                return presigned_url
-                        except:
-                            # Maybe it's a direct file URL
-                            if response.headers.get('content-type', '').startswith('application/'):
-                                self.logger.info(f"✓ Found direct file download: G{i}H{j}!")
-                                return get_url
-                        
-                        self.logger.info(f"G{i}H{j} got 200 but no usable URL: {response.text[:100]}")
+                    if presigned_url:
+                        self.logger.info(f"✓ Got pre-signed URL from Trackland API")
+                        return presigned_url
                     else:
-                        self.logger.info(f"G{i}H{j} returned status {response.status_code}: {response.text[:100]}")
+                        self.logger.error(f"No URL found in API response: {result}")
                         
-                except Exception as e:
-                    self.logger.info(f"G{i}H{j} failed: {e}")
-                    continue
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"Invalid JSON response from Trackland API: {e}")
+            else:
+                self.logger.error(f"Trackland API returned status {response.status_code}: {response.text[:200]}")
+                
+        except Exception as e:
+            self.logger.error(f"Error calling Trackland API: {e}")
         
-        # Then try POST requests with different payloads
-        for i, payload in enumerate(payload_formats, 1):
-            for j, headers in enumerate(header_combinations, 1):
-                try:
-                    self.logger.info(f"Trying POST payload {i} with headers {j}: {api_url}")
-                    self.logger.info(f"Payload: {payload}")
-                    
-                    # Ensure proper JSON encoding
-                    json_data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-                    
-                    response = requests.post(
-                        api_url, 
-                        data=json_data, 
-                        headers=headers, 
-                        timeout=10
-                    )
-                    
-                    if response.status_code == 200:
-                        try:
-                            result = response.json()
-                            presigned_url = result.get('data', {}).get('url') or result.get('url') or result.get('presignedUrl') or result.get('downloadUrl')
-                            
-                            if presigned_url:
-                                self.logger.info(f"✓ Found working POST: P{i}H{j}!")
-                                self.logger.info(f"✓ Got pre-signed URL: {presigned_url[:50]}...")
-                                return presigned_url
-                            else:
-                                self.logger.info(f"No URL in POST response P{i}H{j}: {result}")
-                        except:
-                            # Maybe it returns plain text URL
-                            if 'http' in response.text:
-                                self.logger.info(f"✓ Found plain text URL: P{i}H{j}!")
-                                return response.text.strip()
-                    else:
-                        self.logger.info(f"P{i}H{j} returned status {response.status_code}: {response.text[:100]}")
-                            
-                except Exception as e:
-                    self.logger.info(f"P{i}H{j} failed: {e}")
-                    continue
-        
-        self.logger.info("No working payload format found for pre-signed URLs")
         return None
     
     def _try_trackland_document_api(self, file_identifier: str) -> Optional[Tuple[bytes, int]]:
