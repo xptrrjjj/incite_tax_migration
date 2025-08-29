@@ -294,20 +294,58 @@ class S3Manager:
             self.logger.error(f"❌ Error creating S3 bucket: {e}")
             return False
     
-    def download_from_external_s3(self, s3_url: str) -> Optional[bytes]:
-        """Download file from external S3 bucket using public URL."""
+    def download_via_salesforce(self, s3_url: str, sf_instance: Salesforce, doclistentry_id: str) -> Optional[bytes]:
+        """Download file through Salesforce's authenticated session or ContentDocument API."""
         try:
-            # Download using requests (public URL)
-            response = requests.get(s3_url, timeout=60)
+            # Method 1: Try direct download with Salesforce session
+            headers = {
+                'Authorization': f'Bearer {sf_instance.session_id}',
+                'User-Agent': 'simple-salesforce/1.0'
+            }
+            
+            response = requests.get(s3_url, headers=headers, timeout=120)
             
             if response.status_code == 200:
+                self.logger.info(f"Successfully downloaded via Salesforce session ({len(response.content)} bytes)")
                 return response.content
+            elif response.status_code == 403:
+                self.logger.info("Direct S3 access denied, trying alternative Salesforce methods...")
+                
+                # Method 2: Try to find corresponding ContentDocument
+                try:
+                    # Look for ContentDocumentLinks related to this DocListEntry
+                    content_query = f"""
+                        SELECT ContentDocumentId, ContentDocument.LatestPublishedVersionId
+                        FROM ContentDocumentLink 
+                        WHERE LinkedEntityId = '{doclistentry_id}'
+                        LIMIT 1
+                    """
+                    
+                    content_result = sf_instance.query(content_query)
+                    if content_result['records']:
+                        content_doc_id = content_result['records'][0]['ContentDocumentId']
+                        version_id = content_result['records'][0]['ContentDocument']['LatestPublishedVersionId']
+                        
+                        # Try to download via ContentVersion
+                        version_url = f"{sf_instance.base_url}sobjects/ContentVersion/{version_id}/VersionData"
+                        version_response = requests.get(version_url, headers=headers, timeout=120)
+                        
+                        if version_response.status_code == 200:
+                            self.logger.info(f"Successfully downloaded via ContentVersion API ({len(version_response.content)} bytes)")
+                            return version_response.content
+                        else:
+                            self.logger.warning(f"ContentVersion download failed. Status: {version_response.status_code}")
+                    
+                except Exception as content_error:
+                    self.logger.warning(f"ContentDocument method failed: {content_error}")
+                
+                return None
             else:
                 self.logger.error(f"Failed to download file. Status: {response.status_code}")
                 return None
                 
         except Exception as e:
-            self.logger.error(f"Error downloading from external S3: {e}")
+            self.logger.error(f"Error downloading via Salesforce: {e}")
             return None
     
     def upload_file(self, file_content: bytes, s3_key: str, 
@@ -442,8 +480,8 @@ class SimpleBackupMigration:
             s3_key = self.generate_s3_key(file_info)
             
             if not MIGRATION_CONFIG.get('dry_run', False):
-                # Download file from external S3
-                file_content = self.s3_manager.download_from_external_s3(external_s3_url)
+                # Download file via Salesforce session
+                file_content = self.s3_manager.download_via_salesforce(external_s3_url, self.sf_manager.sf, doclistentry_id)
                 
                 if not file_content:
                     self.logger.error(f"Failed to download file: {filename}")
