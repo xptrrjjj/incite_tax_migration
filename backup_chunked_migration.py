@@ -752,30 +752,43 @@ class ChunkedBackupMigration:
         # Use the discovered working endpoint
         api_url = "https://incitetax.trackland.com/api/generate/presigned-url"
         
-        # Try different payload formats since we got 400 error suggesting wrong format
+        # Try different payload formats and request methods based on errors
+        
+        # Try GET request first (many APIs use GET for reading)
+        get_urls = [
+            f"https://incitetax.trackland.com/api/generate/presigned-url?identifier={file_identifier}&action={action}",
+            f"https://incitetax.trackland.com/api/generate/presigned-url?identifier={file_identifier}&app=pdf-editor-sf&action={action}",
+            f"https://incitetax.trackland.com/api/document/versions/{file_identifier}",
+            f"https://incitetax.trackland.com/api/files/{file_identifier}/download"
+        ]
+        
         payload_formats = [
-            # Format 1: Simple identifier
-            {
-                "identifier": file_identifier,
-                "action": action
-            },
-            # Format 2: With app context
+            # Format 1: Exact JS pattern from PDF viewer
             {
                 "identifier": file_identifier,
                 "app": "pdf-editor-sf",
+                "action": "save-new-version" if action == "read" else action  # Use original action from JS
+            },
+            # Format 2: Array format (since API expects iterable)
+            {
+                "identifiers": [file_identifier],  # Array format
+                "app": "pdf-editor-sf",
                 "action": action
             },
-            # Format 3: Nested data structure
+            # Format 3: Alternative actions from JS
             {
-                "data": {
-                    "identifier": file_identifier,
-                    "action": action
-                }
+                "identifier": file_identifier,
+                "app": "pdf-editor-sf", 
+                "action": "get-file"
             },
-            # Format 4: Different key names
+            # Format 4: Document API format
             {
                 "fileId": file_identifier,
-                "operation": action
+                "type": "download"
+            },
+            # Format 5: Simple identifier only
+            {
+                "identifier": file_identifier
             }
         ]
         
@@ -810,10 +823,43 @@ class ChunkedBackupMigration:
             }
         ]
         
+        # First try GET requests (common for reading operations)
+        for i, get_url in enumerate(get_urls, 1):
+            for j, headers in enumerate(header_combinations, 1):
+                try:
+                    self.logger.info(f"Trying GET request {i} with headers {j}: {get_url[:60]}...")
+                    
+                    response = requests.get(get_url, headers=headers, timeout=10)
+                    
+                    if response.status_code == 200:
+                        # Try to parse as JSON first
+                        try:
+                            result = response.json()
+                            presigned_url = result.get('data', {}).get('url') or result.get('url') or result.get('presignedUrl') or result.get('downloadUrl')
+                            
+                            if presigned_url:
+                                self.logger.info(f"✓ Found working GET: G{i}H{j}!")
+                                self.logger.info(f"✓ Got pre-signed URL: {presigned_url[:50]}...")
+                                return presigned_url
+                        except:
+                            # Maybe it's a direct file URL
+                            if response.headers.get('content-type', '').startswith('application/'):
+                                self.logger.info(f"✓ Found direct file download: G{i}H{j}!")
+                                return get_url
+                        
+                        self.logger.info(f"G{i}H{j} got 200 but no usable URL: {response.text[:100]}")
+                    else:
+                        self.logger.info(f"G{i}H{j} returned status {response.status_code}: {response.text[:100]}")
+                        
+                except Exception as e:
+                    self.logger.info(f"G{i}H{j} failed: {e}")
+                    continue
+        
+        # Then try POST requests with different payloads
         for i, payload in enumerate(payload_formats, 1):
             for j, headers in enumerate(header_combinations, 1):
                 try:
-                    self.logger.info(f"Trying payload format {i} with headers {j}: {api_url}")
+                    self.logger.info(f"Trying POST payload {i} with headers {j}: {api_url}")
                     self.logger.info(f"Payload: {payload}")
                     
                     # Ensure proper JSON encoding
@@ -827,15 +873,21 @@ class ChunkedBackupMigration:
                     )
                     
                     if response.status_code == 200:
-                        result = response.json()
-                        presigned_url = result.get('data', {}).get('url') or result.get('url') or result.get('presignedUrl')
-                        
-                        if presigned_url:
-                            self.logger.info(f"✓ Found working combination: payload {i}, headers {j}!")
-                            self.logger.info(f"✓ Got pre-signed URL: {presigned_url[:50]}...")
-                            return presigned_url
-                        else:
-                            self.logger.info(f"No URL in response with P{i}H{j}: {result}")
+                        try:
+                            result = response.json()
+                            presigned_url = result.get('data', {}).get('url') or result.get('url') or result.get('presignedUrl') or result.get('downloadUrl')
+                            
+                            if presigned_url:
+                                self.logger.info(f"✓ Found working POST: P{i}H{j}!")
+                                self.logger.info(f"✓ Got pre-signed URL: {presigned_url[:50]}...")
+                                return presigned_url
+                            else:
+                                self.logger.info(f"No URL in POST response P{i}H{j}: {result}")
+                        except:
+                            # Maybe it returns plain text URL
+                            if 'http' in response.text:
+                                self.logger.info(f"✓ Found plain text URL: P{i}H{j}!")
+                                return response.text.strip()
                     else:
                         self.logger.info(f"P{i}H{j} returned status {response.status_code}: {response.text[:100]}")
                             
