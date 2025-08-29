@@ -143,14 +143,15 @@ class SalesforceManager:
                 target_account_ids = [test_account_id]
                 self.logger.info(f"Filtering by Account ID: {test_account_id}")
             else:
-                # Get all accounts with DocListEntry__c records (using the working pattern from salesforce_s3_migration.py)
+                # Get all accounts with DocListEntry__c records (modified to avoid SOQL aliasing error)
                 self.logger.info("Getting all accounts with DocListEntry__c records...")
                 accounts_query = """
-                    SELECT DISTINCT Account__c, Account__r.Name
+                    SELECT Account__c
                     FROM DocListEntry__c
                     WHERE Account__c != NULL
                     AND IsDeleted = FALSE
                     AND Document__c != NULL
+                    GROUP BY Account__c
                     LIMIT 200
                 """
                 
