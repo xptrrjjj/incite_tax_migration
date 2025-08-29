@@ -658,6 +658,10 @@ class ChunkedBackupMigration:
             if org_url.endswith('.com/'):
                 org_url = org_url.rstrip('/')
             
+            # Ensure URL has proper scheme
+            if not org_url.startswith('https://'):
+                org_url = f"https://{org_url}"
+            
             # Trackland API endpoint for pre-signed URL generation
             api_url = f"{org_url}/api/generate/presigned-url"
             
@@ -704,6 +708,10 @@ class ChunkedBackupMigration:
             org_url = self.sf.sf_instance
             if org_url.endswith('.com/'):
                 org_url = org_url.rstrip('/')
+            
+            # Ensure URL has proper scheme
+            if not org_url.startswith('https://'):
+                org_url = f"https://{org_url}"
             
             # Try document versions API endpoint
             api_url = f"{org_url}/api/document/versions/{file_identifier}"
