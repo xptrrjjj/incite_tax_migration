@@ -59,17 +59,17 @@ def test_real_api():
     # The real API URL pattern
     api_url = f"https://incitetax.api.trackland.com/api/generate/presigned-url/{identifier}"
     
-    # Headers from the curl command
+    # Headers from the curl command with the valid token
     headers = {
         "accept": "*/*",
         "accept-language": "en-US,en;q=0.9",
-        "authorization": f"Bearer {sf.session_id}",  # Try Salesforce session first
+        "authorization": "Bearer U2FsdGVkX1+v3DTrAXS/6wknJyOFMGwOV7/N3fDyarBNOi2R77zRFfpq3WiWIiMMYa06xq8zsFuSc5xC+pNh10ax7jCyF4cpLVrobwkFUjFfSSwjlKqNxEm2rCwNMqZYoRlirbv0oDRNGwmow8gw/w==",
         "content-type": "application/json",
         "origin": "https://incitetax.lightning.force.com",
         "referer": "https://incitetax.lightning.force.com/",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
         "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
+        "sec-fetch-mode": "cors", 
         "sec-fetch-site": "cross-site"
     }
     
