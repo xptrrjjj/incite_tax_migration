@@ -196,11 +196,11 @@ class EndpointDiscovery:
             result = self.test_endpoint(url, "POST")
             
             if result['working']:
-                print(f"  ✅ WORKING: {result['status']} - {result['response_text'][:100]}")
+                print(f"  ✅ WORKING: {result['status']} - {result.get('response_text', '')[:100]}")
                 results['working'].append(result)
                 self.working_endpoints.append(url)
             elif result['status'] not in ['timeout', 'connection_error', 404]:
-                print(f"  🤔 INTERESTING: {result['status']} - {result['response_text'][:100]}")
+                print(f"  🤔 INTERESTING: {result['status']} - {result.get('response_text', '')[:100]}")
                 results['interesting'].append(result)
             else:
                 print(f"  ❌ Failed: {result['status']}")
@@ -232,7 +232,7 @@ class EndpointDiscovery:
             
             result = self.test_endpoint(url, "POST")
             if result['working'] or result['status'] not in [404, 'connection_error']:
-                print(f"  🎯 Apex result: {result['status']} - {result['response_text'][:100]}")
+                print(f"  🎯 Apex result: {result['status']} - {result.get('response_text', '')[:100]}")
                 if result['working']:
                     self.working_endpoints.append(url)
     

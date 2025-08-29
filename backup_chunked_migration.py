@@ -747,70 +747,68 @@ class ChunkedBackupMigration:
             raise Exception(f"Download failed: {e}")
     
     def _get_trackland_presigned_url(self, file_identifier: str, action: str = "read") -> Optional[str]:
-        """Generate pre-signed URL using Trackland API - try multiple base URLs."""
-        # Try different possible API base URLs since the main org URL returns 404
-        potential_base_urls = [
-            # Original org URL
-            self.sf.sf_instance,
-            # Possible Trackland-specific subdomains
-            "trackland-api.herokuapp.com",
-            "api.trackland.com", 
-            f"trackland-{self.sf.sf_instance.split('.')[0].replace('https://', '')}.herokuapp.com",
-            # Alternative patterns
-            f"api-{self.sf.sf_instance.split('.')[0].replace('https://', '')}.trackland.com"
+        """Generate pre-signed URL using discovered Trackland API endpoint."""
+        # Use the discovered working endpoint
+        api_url = "https://incitetax.trackland.com/api/generate/presigned-url"
+        
+        # Try different payload formats since we got 400 error suggesting wrong format
+        payload_formats = [
+            # Format 1: Simple identifier
+            {
+                "identifier": file_identifier,
+                "action": action
+            },
+            # Format 2: With app context
+            {
+                "identifier": file_identifier,
+                "app": "pdf-editor-sf",
+                "action": action
+            },
+            # Format 3: Nested data structure
+            {
+                "data": {
+                    "identifier": file_identifier,
+                    "action": action
+                }
+            },
+            # Format 4: Different key names
+            {
+                "fileId": file_identifier,
+                "operation": action
+            }
         ]
         
-        for base_url in potential_base_urls:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.sf.session_id}",
+            "User-Agent": "simple-salesforce/1.0"
+        }
+        
+        for i, payload in enumerate(payload_formats, 1):
             try:
-                # Ensure URL has proper scheme
-                if not base_url.startswith('https://'):
-                    org_url = f"https://{base_url}"
-                else:
-                    org_url = base_url
-                    
-                if org_url.endswith('.com/'):
-                    org_url = org_url.rstrip('/')
-                
-                # Trackland API endpoint for pre-signed URL generation
-                api_url = f"{org_url}/api/generate/presigned-url"
-                
-                # Prepare request payload based on discovered pattern
-                payload = {
-                    "identifier": file_identifier,
-                    "app": "pdf-editor-sf",  # App identifier from PDF viewer
-                    "action": action  # "read" for download, "save-new-version" for upload
-                }
-                
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.sf.session_id}",
-                    "User-Agent": "simple-salesforce/1.0"
-                }
-                
-                self.logger.info(f"Trying API base URL: {api_url}")
+                self.logger.info(f"Trying payload format {i}: {api_url}")
+                self.logger.info(f"Payload: {payload}")
                 
                 response = requests.post(api_url, json=payload, headers=headers, timeout=10)
                 
                 if response.status_code == 200:
                     result = response.json()
-                    presigned_url = result.get('data', {}).get('url')
+                    presigned_url = result.get('data', {}).get('url') or result.get('url') or result.get('presignedUrl')
                     
                     if presigned_url:
-                        self.logger.info(f"✓ Found working API at {org_url}")
+                        self.logger.info(f"✓ Found working payload format {i}!")
                         self.logger.info(f"✓ Got pre-signed URL: {presigned_url[:50]}...")
                         return presigned_url
                     else:
-                        self.logger.info(f"No URL in response from {org_url}: {result}")
-                elif response.status_code == 404:
-                    self.logger.info(f"API not found at {org_url} (404)")
+                        self.logger.info(f"No URL in response with format {i}: {result}")
                 else:
-                    self.logger.info(f"API at {org_url} returned status {response.status_code}: {response.text[:200]}")
+                    self.logger.info(f"Format {i} returned status {response.status_code}: {response.text[:200]}")
                         
             except Exception as e:
-                self.logger.info(f"Failed to connect to {base_url}: {e}")
+                self.logger.info(f"Payload format {i} failed: {e}")
                 continue
         
-        self.logger.info("No working API base URL found for pre-signed URLs")
+        self.logger.info("No working payload format found for pre-signed URLs")
         return None
     
     def _try_trackland_document_api(self, file_identifier: str) -> Optional[Tuple[bytes, int]]:
