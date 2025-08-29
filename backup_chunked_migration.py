@@ -174,6 +174,7 @@ class ChunkedBackupMigration:
         try:
             self.logger.info("Getting accounts with DocListEntry records...")
             
+            # Use regular query() with LIMIT since aggregate queries don't support query_all()
             query = """
                 SELECT Account__c, Account__r.Name, COUNT(Id)
                 FROM DocListEntry__c 
@@ -181,9 +182,10 @@ class ChunkedBackupMigration:
                 AND Account__c != NULL
                 GROUP BY Account__c, Account__r.Name
                 ORDER BY COUNT(Id) DESC
+                LIMIT 2000
             """
             
-            result = self.sf.query_all(query)
+            result = self.sf.query(query)
             accounts = result['records']
             
             self.logger.info(f"Found {len(accounts)} accounts with DocListEntry records")
