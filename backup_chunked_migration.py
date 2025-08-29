@@ -175,7 +175,7 @@ class ChunkedBackupMigration:
             self.logger.info("Getting accounts with DocListEntry records...")
             
             query = """
-                SELECT Account__c, Account__r.Name, COUNT(Id) as record_count
+                SELECT Account__c, Account__r.Name, COUNT(Id)
                 FROM DocListEntry__c 
                 WHERE Document__c != NULL 
                 AND Account__c != NULL
@@ -190,7 +190,8 @@ class ChunkedBackupMigration:
             
             # Log top accounts
             for i, account in enumerate(accounts[:5]):
-                self.logger.info(f"  {i+1}. {account['Account__r']['Name']}: {account['record_count']} files")
+                count = account.get('expr0', 0)  # Salesforce returns COUNT() as 'expr0'
+                self.logger.info(f"  {i+1}. {account['Account__r']['Name']}: {count} files")
             
             return accounts
             
@@ -274,7 +275,7 @@ class ChunkedBackupMigration:
             for i, account in enumerate(accounts, 1):
                 account_id = account['Account__c']
                 account_name = account['Account__r']['Name']
-                record_count = account['record_count']
+                record_count = account.get('expr0', 0)  # COUNT() result
                 
                 self.logger.info("=" * 60)
                 self.logger.info(f"Processing Account {i}/{len(accounts)}: {account_name}")
