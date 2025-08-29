@@ -119,6 +119,7 @@
             border-radius: 12px;
             overflow: hidden;
             margin-bottom: 10px;
+            position: relative;
         }
         
         .progress-fill {
@@ -138,9 +139,12 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: white;
+            color: #2c3e50;
             font-weight: bold;
             font-size: 0.9em;
+            z-index: 10;
+            white-space: nowrap;
+            text-shadow: 1px 1px 1px rgba(255,255,255,0.8);
         }
         
         .tables-container {
@@ -294,16 +298,14 @@
                 <div class="progress-section">
                     <h3>Phase 1 Progress (Backup)</h3>
                     <div class="progress-bar">
-                        <div class="progress-fill" id="backup-progress">
-                            <div class="progress-text" id="backup-progress-text">0%</div>
-                        </div>
+                        <div class="progress-fill" id="backup-progress"></div>
+                        <div class="progress-text" id="backup-progress-text">0%</div>
                     </div>
                     
                     <h3>Phase 2 Progress (Full Migration)</h3>
                     <div class="progress-bar">
-                        <div class="progress-fill phase2" id="migration-progress">
-                            <div class="progress-text" id="migration-progress-text">0%</div>
-                        </div>
+                        <div class="progress-fill phase2" id="migration-progress"></div>
+                        <div class="progress-text" id="migration-progress-text">0%</div>
                     </div>
                 </div>
                 
