@@ -344,7 +344,31 @@ class S3Manager:
                 except Exception as content_error:
                     self.logger.warning(f"ContentDocument method failed: {content_error}")
                 
-                # Method 3: Try without authentication (public access)
+                # Method 3: Try Salesforce document viewer/preview URLs
+                self.logger.info("Trying Salesforce document viewer URLs...")
+                try:
+                    # Try common Salesforce document viewer patterns
+                    preview_patterns = [
+                        f"{sf_instance.base_url}servlet/servlet.FileDownload?file={doclistentry_id}",
+                        f"{sf_instance.base_url}sfc/servlet.shepherd/document/download/{doclistentry_id}",
+                        f"{sf_instance.base_url}servlet/servlet.ImageServer?oid={doclistentry_id}",
+                    ]
+                    
+                    for preview_url in preview_patterns:
+                        try:
+                            self.logger.debug(f"Trying preview URL: {preview_url}")
+                            preview_response = requests.get(preview_url, headers=headers, timeout=120)
+                            if preview_response.status_code == 200 and len(preview_response.content) > 100:
+                                self.logger.info(f"Successfully downloaded via Salesforce preview ({len(preview_response.content)} bytes)")
+                                return preview_response.content
+                        except Exception as preview_error:
+                            self.logger.debug(f"Preview URL failed: {preview_error}")
+                            continue
+                    
+                except Exception as preview_error:
+                    self.logger.warning(f"Salesforce preview method failed: {preview_error}")
+
+                # Method 4: Try without authentication (public access)
                 self.logger.info("Trying public access without authentication...")
                 try:
                     public_response = requests.get(s3_url, timeout=120)

@@ -79,10 +79,9 @@ class BackupAnalyzer:
                 AND IsDeleted = FALSE
                 AND Document__c != NULL
                 GROUP BY Account__c
-                LIMIT 300
             """
             
-            accounts_result = self.sf.query(accounts_query)
+            accounts_result = self.sf.query_all(accounts_query)
             target_account_ids = [acc['Account__c'] for acc in accounts_result['records']]
             
             self.logger.info(f"Found {len(target_account_ids)} accounts with DocListEntry__c files")
