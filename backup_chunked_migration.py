@@ -517,16 +517,67 @@ class ChunkedBackupMigration:
             return False
     
     def download_file(self, url: str, doclist_entry_id: str = None) -> Tuple[bytes, int]:
-        """Download file with enhanced authentication strategies."""
+        """Download file using Trackland API pre-signed URL approach."""
         try:
             # Validate that this is a trackland URL
             if 'trackland-doc-storage' not in url:
                 self.logger.warning(f"Skipping non-trackland URL: {url}")
                 raise Exception(f"Not a trackland-doc-storage URL: {url}")
             
-            self.logger.debug(f"Attempting download: {url}")
+            self.logger.debug(f"Attempting download via Trackland API: {url}")
             
-            # Method 1: Try direct access without authentication (in case bucket allows public read)
+            # Extract file identifier from URL
+            # URL format: https://trackland-doc-storage.s3.amazonaws.com/uploads/001.../AccountName/filename
+            # We need the S3 key: uploads/001.../AccountName/filename
+            parsed_url = urlparse(url)
+            file_identifier = parsed_url.path.lstrip('/')  # Remove leading slash
+            
+            if not file_identifier:
+                raise Exception(f"Could not extract file identifier from URL: {url}")
+            
+            self.logger.debug(f"Extracted file identifier: {file_identifier}")
+            
+            # Method 1: Try Trackland API pre-signed URL generation
+            try:
+                presigned_url = self._get_trackland_presigned_url(file_identifier, "read")
+                if presigned_url:
+                    self.logger.debug("✓ Got pre-signed URL from Trackland API")
+                    
+                    # Download using pre-signed URL
+                    response = requests.get(presigned_url, timeout=300, allow_redirects=True)
+                    
+                    if response.status_code == 200:
+                        content = response.content
+                        size = len(content)
+                        
+                        # Basic validation - check if we got actual file content
+                        if size > 0 and not response.headers.get('content-type', '').startswith('text/html'):
+                            self.logger.debug(f"✓ Pre-signed URL download successful ({size} bytes)")
+                            
+                            # Check file size limits
+                            max_size_bytes = MIGRATION_CONFIG.get("max_file_size_mb", 100) * 1024 * 1024
+                            if size > max_size_bytes:
+                                raise ValueError(f"File size {size} bytes exceeds limit of {max_size_bytes} bytes")
+                            
+                            return content, size
+                        else:
+                            self.logger.debug("Pre-signed URL returned HTML (likely error page)")
+                    else:
+                        self.logger.debug(f"Pre-signed URL failed with status: {response.status_code}")
+                        
+            except Exception as presigned_error:
+                self.logger.debug(f"Trackland API pre-signed URL failed: {presigned_error}")
+            
+            # Method 2: Try Trackland document versions API
+            try:
+                content_result = self._try_trackland_document_api(file_identifier)
+                if content_result:
+                    self.logger.debug(f"✓ Trackland document API successful")
+                    return content_result
+            except Exception as doc_api_error:
+                self.logger.debug(f"Trackland document API failed: {doc_api_error}")
+            
+            # Method 3: Try direct access without authentication (fallback)
             try:
                 response = requests.get(url, timeout=300, allow_redirects=True)
                 
@@ -550,7 +601,7 @@ class ChunkedBackupMigration:
             except Exception as direct_error:
                 self.logger.debug(f"Direct access failed: {direct_error}")
             
-            # Method 2: Try ContentDocument API if we have doclist_entry_id (preferred for Salesforce files)
+            # Method 4: Try ContentDocument API if we have doclist_entry_id
             if doclist_entry_id:
                 self.logger.debug("Attempting ContentDocument API download...")
                 try:
@@ -561,51 +612,9 @@ class ChunkedBackupMigration:
                 except Exception as cd_error:
                     self.logger.debug(f"ContentDocument API failed: {cd_error}")
             
-            # Method 3: Try with various header combinations
-            headers_to_try = [
-                # Standard Salesforce session
-                {
-                    'Authorization': f'Bearer {self.sf.session_id}',
-                    'User-Agent': 'simple-salesforce/1.0',
-                    'Accept': '*/*'
-                },
-                # OAuth format
-                {
-                    'Authorization': f'OAuth {self.sf.session_id}',
-                    'User-Agent': 'Salesforce/1.0'
-                },
-                # Session ID in different formats
-                {
-                    'X-SFDC-Session': self.sf.session_id,
-                    'User-Agent': 'simple-salesforce/1.0'
-                }
-            ]
-            
-            for i, headers in enumerate(headers_to_try, 1):
-                try:
-                    self.logger.debug(f"Trying header combination {i}...")
-                    auth_response = requests.get(url, headers=headers, timeout=300)
-                    
-                    if auth_response.status_code == 200:
-                        content = auth_response.content
-                        size = len(content)
-                        
-                        if size > 0:
-                            self.logger.debug(f"✓ Header method {i} successful ({size} bytes)")
-                            
-                            # Check file size limits
-                            max_size_bytes = MIGRATION_CONFIG.get("max_file_size_mb", 100) * 1024 * 1024
-                            if size > max_size_bytes:
-                                raise ValueError(f"File size {size} bytes exceeds limit of {max_size_bytes} bytes")
-                            
-                            return content, size
-                            
-                except Exception as auth_error:
-                    self.logger.debug(f"Header method {i} failed: {auth_error}")
-                    continue
-            
             # All methods failed - provide detailed error info
             self.logger.error(f"❌ All download methods failed for: {url}")
+            self.logger.error(f"File identifier: {file_identifier}")
             
             # Try one final diagnostic call to understand the error
             try:
@@ -621,6 +630,90 @@ class ChunkedBackupMigration:
             
         except Exception as e:
             raise Exception(f"Download failed: {e}")
+    
+    def _get_trackland_presigned_url(self, file_identifier: str, action: str = "read") -> Optional[str]:
+        """Generate pre-signed URL using Trackland API."""
+        try:
+            # Get Salesforce instance URL for API calls
+            org_url = self.sf.sf_instance
+            if org_url.endswith('.com/'):
+                org_url = org_url.rstrip('/')
+            
+            # Trackland API endpoint for pre-signed URL generation
+            api_url = f"{org_url}/api/generate/presigned-url"
+            
+            # Prepare request payload based on discovered pattern
+            payload = {
+                "identifier": file_identifier,
+                "app": "pdf-editor-sf",  # App identifier from PDF viewer
+                "action": action  # "read" for download, "save-new-version" for upload
+            }
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.sf.session_id}",
+                "User-Agent": "simple-salesforce/1.0"
+            }
+            
+            self.logger.debug(f"Requesting pre-signed URL from: {api_url}")
+            self.logger.debug(f"Payload: {payload}")
+            
+            response = requests.post(api_url, json=payload, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                presigned_url = result.get('data', {}).get('url')
+                
+                if presigned_url:
+                    self.logger.debug(f"✓ Got pre-signed URL: {presigned_url[:50]}...")
+                    return presigned_url
+                else:
+                    self.logger.debug(f"No URL in response: {result}")
+            else:
+                self.logger.debug(f"API returned status {response.status_code}: {response.text[:200]}")
+            
+            return None
+            
+        except Exception as e:
+            self.logger.debug(f"Pre-signed URL generation failed: {e}")
+            return None
+    
+    def _try_trackland_document_api(self, file_identifier: str) -> Optional[Tuple[bytes, int]]:
+        """Try downloading via Trackland document versions API."""
+        try:
+            # Get Salesforce instance URL
+            org_url = self.sf.sf_instance
+            if org_url.endswith('.com/'):
+                org_url = org_url.rstrip('/')
+            
+            # Try document versions API endpoint
+            api_url = f"{org_url}/api/document/versions/{file_identifier}"
+            
+            headers = {
+                "Authorization": f"Bearer {self.sf.session_id}",
+                "User-Agent": "simple-salesforce/1.0",
+                "Accept": "application/octet-stream"
+            }
+            
+            self.logger.debug(f"Trying document API: {api_url}")
+            
+            response = requests.get(api_url, headers=headers, timeout=300)
+            
+            if response.status_code == 200:
+                content = response.content
+                size = len(content)
+                
+                if size > 0:
+                    self.logger.debug(f"Document API successful ({size} bytes)")
+                    return content, size
+            else:
+                self.logger.debug(f"Document API returned status {response.status_code}")
+            
+            return None
+            
+        except Exception as e:
+            self.logger.debug(f"Trackland document API failed: {e}")
+            return None
     
     def _try_content_document_download(self, doclist_entry_id: str) -> Optional[Tuple[bytes, int]]:
         """Try downloading via ContentDocument API."""
