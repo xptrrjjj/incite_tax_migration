@@ -221,8 +221,8 @@ class BackupAnalyzer:
         processable_files = 0
         skipped_files = 0
         
-        # Allowed extensions from config
-        allowed_extensions = MIGRATION_CONFIG.get('allowed_extensions', [])
+        # For backup analysis, we don't skip any files - backup EVERYTHING
+        allowed_extensions = []  # Empty list means allow all extensions
         
         for file_info in files:
             account_id = file_info['account_id']
@@ -246,13 +246,9 @@ class BackupAnalyzer:
                 trackland_files += 1
                 account_stats[account_id]['trackland_files'] += 1
                 
-                # Check if processable
-                if not allowed_extensions or (file_ext and file_ext in allowed_extensions):
-                    processable_files += 1
-                    account_stats[account_id]['processable_files'] += 1
-                else:
-                    skipped_files += 1
-                    account_stats[account_id]['skipped_files'] += 1
+                # For backup, we process ALL trackland files regardless of extension
+                processable_files += 1
+                account_stats[account_id]['processable_files'] += 1
             else:
                 account_stats[account_id]['other_files'] += 1
         

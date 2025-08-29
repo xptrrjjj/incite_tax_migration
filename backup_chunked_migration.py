@@ -310,7 +310,7 @@ class ChunkedBackupMigration:
             raise
     
     def process_all_chunked(self):
-        """Process all files in chunks."""
+        """Process all files in chunks using cursor-based pagination."""
         try:
             self.logger.info("Processing all records in chunks...")
             
@@ -320,31 +320,52 @@ class ChunkedBackupMigration:
                 FROM DocListEntry__c 
                 WHERE Document__c != NULL 
                 AND Account__c != NULL
+                AND Type_Current__c = 'Document'
             """)
             total_records = count_result['totalSize']
             
             self.logger.info(f"Total records to process: {total_records:,}")
             
             processed = 0
+            last_id = None
+            chunk_num = 0
             
-            while processed < total_records:
-                self.logger.info(f"📦 Processing chunk {processed+1}-{min(processed+self.chunk_size, total_records)} of {total_records}")
+            while True:
+                chunk_num += 1
                 
-                query = f"""
-                    SELECT Id, Name, Document__c, Account__c, Account__r.Name, 
-                           LastModifiedDate, CreatedDate, SystemModstamp
-                    FROM DocListEntry__c 
-                    WHERE Document__c != NULL 
-                    AND Account__c != NULL
-                    ORDER BY Id
-                    LIMIT {self.chunk_size} OFFSET {processed}
-                """
+                # Cursor-based pagination using WHERE Id > last_id
+                if last_id:
+                    query = f"""
+                        SELECT Id, Name, Document__c, Account__c, Account__r.Name, 
+                               LastModifiedDate, CreatedDate
+                        FROM DocListEntry__c 
+                        WHERE Document__c != NULL 
+                        AND Account__c != NULL
+                        AND Type_Current__c = 'Document'
+                        AND Id > '{last_id}'
+                        ORDER BY Id
+                        LIMIT {self.chunk_size}
+                    """
+                else:
+                    # First chunk
+                    query = f"""
+                        SELECT Id, Name, Document__c, Account__c, Account__r.Name, 
+                               LastModifiedDate, CreatedDate
+                        FROM DocListEntry__c 
+                        WHERE Document__c != NULL 
+                        AND Account__c != NULL
+                        AND Type_Current__c = 'Document'
+                        ORDER BY Id
+                        LIMIT {self.chunk_size}
+                    """
                 
                 try:
+                    self.logger.info(f"📦 Processing chunk {chunk_num} ({processed+1}-{processed+self.chunk_size} of ~{total_records:,})")
                     result = self.sf.query(query)
                     records = result['records']
                     
                     if not records:
+                        self.logger.info("No more records found - processing complete")
                         break
                     
                     self.logger.info(f"✓ Retrieved {len(records)} records")
@@ -352,6 +373,8 @@ class ChunkedBackupMigration:
                     # Process this chunk
                     self.process_files_batch(records)
                     
+                    # Update cursor to last ID in this batch
+                    last_id = records[-1]['Id']
                     processed += len(records)
                     self.stats['chunks_processed'] += 1
                     
@@ -359,14 +382,22 @@ class ChunkedBackupMigration:
                     progress = (processed / total_records) * 100
                     self.logger.info(f"📈 Overall progress: {progress:.1f}% ({processed:,}/{total_records:,})")
                     
-                    # Update database stats
-                    self.db.update_run_stats(self.run_id, **self.stats)
+                    # Update database stats every 5 chunks to avoid too much DB activity
+                    if chunk_num % 5 == 0:
+                        self.db.update_run_stats(self.run_id, **self.stats)
+                    
+                    # If we got fewer records than chunk_size, we're at the end
+                    if len(records) < self.chunk_size:
+                        self.logger.info("Reached end of records - processing complete")
+                        break
                     
                 except Exception as e:
-                    self.logger.error(f"❌ Error processing chunk at offset {processed}: {e}")
-                    # Skip this chunk and continue
-                    processed += self.chunk_size
-                    continue
+                    self.logger.error(f"❌ Error processing chunk {chunk_num}: {e}")
+                    # For cursor-based pagination, we can't easily skip, so break
+                    self.logger.error("Stopping due to cursor pagination error")
+                    break
+            
+            self.logger.info(f"Processed {processed:,} total records in {chunk_num} chunks")
             
         except Exception as e:
             self.logger.error(f"❌ Failed to process chunked: {e}")
@@ -414,13 +445,8 @@ class ChunkedBackupMigration:
             parsed_url = urlparse(original_url)
             file_name = os.path.basename(parsed_url.path) or f"file_{doclist_id}"
             
-            # Check file extension
-            file_ext = os.path.splitext(file_name)[1].lower()
-            allowed_extensions = MIGRATION_CONFIG.get("allowed_extensions", [])
-            if allowed_extensions and file_ext not in allowed_extensions:
-                self.logger.debug(f"Skipping file {file_name} - extension {file_ext} not allowed")
-                self.stats['skipped'] += 1
-                return True
+            # For backup mode, we backup ALL files - no extension filtering
+            # (Extension filtering can be applied later in Phase 2 migration if needed)
             
             # Generate S3 key with organized structure
             s3_key = f"uploads/{account_id}/{clean_account_name}/{file_name}"
@@ -436,8 +462,8 @@ class ChunkedBackupMigration:
                 self.stats['skipped'] += 1
                 return True
             
-            # Download file from external S3
-            content, file_size = self.download_file(original_url)
+            # Download file using advanced Salesforce methods
+            content, file_size = self.download_file(original_url, doclist_id)
             
             # Calculate file hash for change detection
             file_hash = calculate_file_hash(content)
@@ -483,38 +509,115 @@ class ChunkedBackupMigration:
             
             return False
     
-    def download_file(self, url: str) -> Tuple[bytes, int]:
-        """Download file from external S3 URL."""
+    def download_file(self, url: str, doclist_entry_id: str = None) -> Tuple[bytes, int]:
+        """Download file using advanced Salesforce session methods."""
         try:
-            response = requests.get(url, stream=True, timeout=300)
-            response.raise_for_status()
+            # Method 1: Try with Salesforce session authentication
+            headers = {
+                'Authorization': f'Bearer {self.sf.session_id}',
+                'User-Agent': 'simple-salesforce/1.0'
+            }
             
-            content = response.content
-            size = len(content)
+            self.logger.debug(f"Attempting download with Salesforce session: {url}")
+            response = requests.get(url, headers=headers, timeout=300)
             
-            # Check file size limits
-            max_size_bytes = MIGRATION_CONFIG.get("max_file_size_mb", 100) * 1024 * 1024
-            if size > max_size_bytes:
-                raise ValueError(f"File size {size} bytes exceeds limit of {max_size_bytes} bytes")
+            if response.status_code == 200:
+                content = response.content
+                size = len(content)
+                self.logger.debug(f"Successfully downloaded via Salesforce session ({size} bytes)")
+                
+                # Check file size limits
+                max_size_bytes = MIGRATION_CONFIG.get("max_file_size_mb", 100) * 1024 * 1024
+                if size > max_size_bytes:
+                    raise ValueError(f"File size {size} bytes exceeds limit of {max_size_bytes} bytes")
+                
+                return content, size
+                
+            # Method 2: Try ContentDocument API if we have doclist_entry_id
+            elif response.status_code in [400, 403] and doclist_entry_id:
+                self.logger.debug("Direct access failed, trying ContentDocument API...")
+                content_docs = self._try_content_document_download(doclist_entry_id, headers)
+                if content_docs:
+                    return content_docs
             
-            return content, size
+            # Method 3: Try without authentication (public access)
+            self.logger.debug("Trying public access...")
+            public_response = requests.get(url, timeout=300)
+            if public_response.status_code == 200:
+                content = public_response.content
+                size = len(content)
+                self.logger.debug(f"Successfully downloaded via public access ({size} bytes)")
+                return content, size
+            
+            # If all methods fail
+            raise Exception(f"All download methods failed. Status: {response.status_code}")
             
         except Exception as e:
             raise Exception(f"Download failed: {e}")
     
+    def _try_content_document_download(self, doclist_entry_id: str, headers: dict) -> Optional[Tuple[bytes, int]]:
+        """Try downloading via ContentDocument API."""
+        try:
+            # Look for ContentDocumentLinks
+            content_query = f"""
+                SELECT ContentDocumentId, ContentDocument.LatestPublishedVersionId
+                FROM ContentDocumentLink 
+                WHERE LinkedEntityId = '{doclist_entry_id}'
+                LIMIT 1
+            """
+            
+            content_result = self.sf.query(content_query)
+            if content_result['records']:
+                version_id = content_result['records'][0]['ContentDocument']['LatestPublishedVersionId']
+                
+                # Try to download via ContentVersion
+                version_url = f"{self.sf.base_url}sobjects/ContentVersion/{version_id}/VersionData"
+                version_response = requests.get(version_url, headers=headers, timeout=300)
+                
+                if version_response.status_code == 200:
+                    content = version_response.content
+                    size = len(content)
+                    self.logger.debug(f"Downloaded via ContentVersion API ({size} bytes)")
+                    return content, size
+            
+            return None
+            
+        except Exception as e:
+            self.logger.debug(f"ContentDocument method failed: {e}")
+            return None
+    
     def upload_to_s3(self, content: bytes, s3_key: str, file_name: str) -> str:
-        """Upload file content to your S3 bucket."""
+        """Upload file content to your S3 bucket with memory optimization."""
         try:
             bucket_name = AWS_CONFIG["bucket_name"]
             
-            self.s3_client.put_object(
-                Bucket=bucket_name,
-                Key=s3_key,
-                Body=content,
-                ContentDisposition=f'attachment; filename="{file_name}"'
-            )
+            # For large files, use streaming upload to avoid memory issues
+            if len(content) > 50 * 1024 * 1024:  # 50MB threshold
+                self.logger.debug(f"Using streaming upload for large file: {self._format_size(len(content))}")
+                # Use BytesIO for streaming large files
+                from io import BytesIO
+                file_obj = BytesIO(content)
+                
+                self.s3_client.put_object(
+                    Bucket=bucket_name,
+                    Key=s3_key,
+                    Body=file_obj,
+                    ContentDisposition=f'attachment; filename="{file_name}"'
+                )
+            else:
+                # Direct upload for smaller files
+                self.s3_client.put_object(
+                    Bucket=bucket_name,
+                    Key=s3_key,
+                    Body=content,
+                    ContentDisposition=f'attachment; filename="{file_name}"'
+                )
             
             s3_url = f"https://{bucket_name}.s3.{AWS_CONFIG['region']}.amazonaws.com/{s3_key}"
+            
+            # Immediately clear the content from memory to free up space
+            del content
+            
             return s3_url
             
         except Exception as e:
