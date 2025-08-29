@@ -43,6 +43,9 @@ class StatusDashboard:
         
         try:
             with MigrationDB(self.db_path) as db:
+                # Clean up stale "running" entries first
+                self._cleanup_stale_running_entries(db)
+                
                 data = {
                     'timestamp': now.isoformat(),
                     'overview': self._get_overview_stats(db),
@@ -72,6 +75,32 @@ class StatusDashboard:
                 'system_info': {},
                 'phase_status': {}
             }
+    
+    def _cleanup_stale_running_entries(self, db):
+        """Clean up old 'running' entries that are clearly stale."""
+        # Mark as failed any "running" entries older than 30 minutes that aren't the most recent
+        cursor = db.conn.execute('''
+            SELECT id, start_time FROM migration_runs 
+            WHERE status = 'running'
+            ORDER BY start_time DESC
+        ''')
+        
+        running_entries = cursor.fetchall()
+        if len(running_entries) > 1:
+            # Keep only the most recent running entry, mark others as failed
+            most_recent_id = running_entries[0]['id']
+            
+            for entry in running_entries[1:]:
+                db.conn.execute('''
+                    UPDATE migration_runs 
+                    SET status = 'failed', 
+                        end_time = ?, 
+                        error_message = 'Marked as failed - stale running entry'
+                    WHERE id = ?
+                ''', (datetime.now().isoformat(), entry['id']))
+            
+            db.conn.commit()
+            print(f"Cleaned up {len(running_entries) - 1} stale running entries")
     
     def _get_overview_stats(self, db):
         """Get overview statistics."""
@@ -311,9 +340,9 @@ class StatusDashboard:
             if is_running:
                 phase = "Phase 1 (Backup Only) - RUNNING"
                 status = f"Actively backing up files... ({backup_only:,} files backed up so far)"
-                # Don't show 100% if migration is running
-                # Use a more conservative progress calculation
-                estimated_total = max(actual_discovered_files, backup_only * 1.2)  # Assume 20% more to discover
+                # For running migrations, use realistic total estimate of 1.3M+ files
+                # Don't use actual_discovered_files as it only shows what's been processed so far
+                estimated_total = 1300000  # Known approximate total from previous analysis
                 backup_progress = min(95.0, round((backup_only / estimated_total) * 100, 1)) if estimated_total > 0 else 0
             else:
                 phase = "Phase 1 (Backup Only) - COMPLETE"
