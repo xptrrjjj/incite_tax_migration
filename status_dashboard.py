@@ -409,6 +409,38 @@ def api_health():
             'error': str(e)
         }), 500
 
+@app.route('/api/recent-errors')
+def api_recent_errors():
+    """Get recent error details."""
+    try:
+        with MigrationDB(dashboard.db_path) as db:
+            cursor = db.conn.execute('''
+                SELECT 
+                    doclist_entry_id,
+                    error_type,
+                    error_message,
+                    original_url,
+                    timestamp
+                FROM migration_errors 
+                WHERE timestamp > datetime('now', '-24 hours')
+                ORDER BY timestamp DESC
+                LIMIT 50
+            ''')
+            
+            errors = []
+            for row in cursor.fetchall():
+                errors.append({
+                    'doclist_entry_id': row[0],
+                    'error_type': row[1], 
+                    'error_message': row[2],
+                    'original_url': row[3],
+                    'timestamp': row[4]
+                })
+            
+            return jsonify({'errors': errors})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     print("=" * 60)
     print("Migration Status Dashboard Starting")
