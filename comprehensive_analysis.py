@@ -74,8 +74,7 @@ class ComprehensiveAnalysis:
             SELECT 
                 Account__c,
                 Account__r.Name,
-                Id,
-                File_Size__c
+                Id
             FROM DocListEntry__c 
             WHERE Account__c != NULL 
             ORDER BY Account__c
@@ -94,22 +93,18 @@ class ComprehensiveAnalysis:
             for i, record in enumerate(all_records):
                 account_id = record['Account__c']
                 account_name = record.get('Account__r', {}).get('Name', 'Unknown Account') if record.get('Account__r') else 'Unknown Account'
-                file_size = record.get('File_Size__c', 0) or 0
                 
                 if account_id not in account_data:
                     account_data[account_id] = {
                         'account_id': account_id,
                         'account_name': account_name,
                         'file_count': 0,
-                        'total_size_bytes': 0,
                         'files': []
                     }
                 
                 account_data[account_id]['file_count'] += 1
-                account_data[account_id]['total_size_bytes'] += float(file_size)
                 account_data[account_id]['files'].append({
-                    'id': record['Id'],
-                    'size': file_size
+                    'id': record['Id']
                 })
                 
                 # Progress indicator for large datasets
@@ -121,43 +116,43 @@ class ComprehensiveAnalysis:
             # Convert to list and sort by file count
             enriched_accounts = []
             total_files = 0
-            total_size_bytes = 0
             
             for rank, (account_id, data) in enumerate(
                 sorted(account_data.items(), key=lambda x: x[1]['file_count'], reverse=True), 1
             ):
                 file_count = data['file_count']
-                size_bytes = data['total_size_bytes']
-                size_gb = size_bytes / (1024 * 1024 * 1024) if size_bytes > 0 else 0
+                # Estimate size based on average file size (we'll use a conservative estimate)
+                estimated_size_gb = file_count * 0.5 / 1024  # Assume 0.5 MB per file average
                 
                 enriched_account = {
                     'rank': rank,
                     'account_id': account_id,
                     'account_name': data['account_name'],
                     'file_count': file_count,
-                    'estimated_size_gb': round(size_gb, 3),
-                    'total_size_bytes': size_bytes,
+                    'estimated_size_gb': round(estimated_size_gb, 3),
                     'percentage_of_total': 0  # Will calculate after totals
                 }
                 
                 enriched_accounts.append(enriched_account)
                 total_files += file_count
-                total_size_bytes += size_bytes
             
             # Calculate percentages
             for account in enriched_accounts:
                 account['percentage_of_total'] = (account['file_count'] / total_files * 100) if total_files > 0 else 0
             
+            # Calculate total estimated size
+            total_estimated_size_gb = sum(account['estimated_size_gb'] for account in enriched_accounts)
+            
             # Store results
             self.analysis_results['total_accounts'] = len(enriched_accounts)
             self.analysis_results['total_files'] = total_files
-            self.analysis_results['estimated_total_size_gb'] = round(total_size_bytes / (1024 * 1024 * 1024), 2)
+            self.analysis_results['estimated_total_size_gb'] = round(total_estimated_size_gb, 2)
             self.analysis_results['account_breakdown'] = enriched_accounts
             
             print(f"📊 FINAL TOTALS:")
             print(f"   🏢 Total Accounts: {len(enriched_accounts):,}")
             print(f"   📄 Total Files: {total_files:,}")
-            print(f"   💾 Total Size: {self.analysis_results['estimated_total_size_gb']:,.2f} GB")
+            print(f"   💾 Total Size: {self.analysis_results['estimated_total_size_gb']:,.2f} GB (estimated)")
             
             accounts = enriched_accounts
             
