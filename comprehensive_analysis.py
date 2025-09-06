@@ -66,20 +66,43 @@ class ComprehensiveAnalysis:
         
         try:
             # Get comprehensive account data with file counts
-            query = """
-            SELECT 
-                Account__c,
-                Account__r.Name,
-                COUNT(Id)
-            FROM DocListEntry__c 
-            WHERE Account__c != NULL 
-            GROUP BY Account__c, Account__r.Name 
-            ORDER BY COUNT(Id) DESC
-            """
+            # Note: Aggregate queries require LIMIT and manual pagination with OFFSET
+            all_accounts = []
+            batch_size = 2000
+            offset = 0
             
-            print(f"🔍 Executing query: {query}")
-            result = self.sf.query_all(query)
-            accounts = result['records']
+            while True:
+                query = f"""
+                SELECT 
+                    Account__c,
+                    Account__r.Name,
+                    COUNT(Id)
+                FROM DocListEntry__c 
+                WHERE Account__c != NULL 
+                GROUP BY Account__c, Account__r.Name 
+                ORDER BY COUNT(Id) DESC
+                LIMIT {batch_size} OFFSET {offset}
+                """
+                
+                print(f"🔍 Fetching accounts {offset+1} to {offset+batch_size}...")
+                result = self.sf.query(query)
+                batch_accounts = result['records']
+                
+                if not batch_accounts:
+                    print(f"✅ No more accounts found - pagination complete")
+                    break
+                
+                all_accounts.extend(batch_accounts)
+                print(f"📊 Retrieved {len(batch_accounts)} accounts (total so far: {len(all_accounts)})")
+                
+                # If we got fewer than batch_size, we're done
+                if len(batch_accounts) < batch_size:
+                    print(f"✅ Retrieved final batch - all accounts loaded")
+                    break
+                
+                offset += batch_size
+            
+            accounts = all_accounts
             
             print(f"✅ Found {len(accounts)} accounts with DocListEntry records")
             
