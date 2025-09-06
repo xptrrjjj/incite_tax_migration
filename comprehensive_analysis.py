@@ -61,86 +61,105 @@ class ComprehensiveAnalysis:
             return False
     
     def get_total_accounts_with_files(self) -> List[Dict]:
-        """Get comprehensive list of all accounts with DocListEntry records."""
-        print("\n📊 Analyzing accounts with DocListEntry records...")
+        """Get comprehensive list of ALL accounts with DocListEntry records."""
+        print("\n📊 Analyzing ALL accounts with DocListEntry records...")
         
         try:
-            # Get comprehensive account data with file counts
-            # Note: Aggregate queries require LIMIT and manual pagination with OFFSET
-            all_accounts = []
-            batch_size = 2000
-            offset = 0
+            # Strategy: Get ALL DocListEntry records, then group by account in Python
+            # This bypasses Salesforce aggregate query limitations completely
+            print("🔍 Retrieving ALL DocListEntry records to analyze locally...")
             
-            while True:
-                query = f"""
-                SELECT 
-                    Account__c,
-                    Account__r.Name,
-                    COUNT(Id)
-                FROM DocListEntry__c 
-                WHERE Account__c != NULL 
-                GROUP BY Account__c, Account__r.Name 
-                ORDER BY COUNT(Id) DESC
-                LIMIT {batch_size} OFFSET {offset}
-                """
-                
-                print(f"🔍 Fetching accounts {offset+1} to {offset+batch_size}...")
-                result = self.sf.query(query)
-                batch_accounts = result['records']
-                
-                if not batch_accounts:
-                    print(f"✅ No more accounts found - pagination complete")
-                    break
-                
-                all_accounts.extend(batch_accounts)
-                print(f"📊 Retrieved {len(batch_accounts)} accounts (total so far: {len(all_accounts)})")
-                
-                # If we got fewer than batch_size, we're done
-                if len(batch_accounts) < batch_size:
-                    print(f"✅ Retrieved final batch - all accounts loaded")
-                    break
-                
-                offset += batch_size
+            # Get all DocListEntry records with account info
+            query = """
+            SELECT 
+                Account__c,
+                Account__r.Name,
+                Id,
+                File_Size__c
+            FROM DocListEntry__c 
+            WHERE Account__c != NULL 
+            ORDER BY Account__c
+            """
             
-            accounts = all_accounts
+            print(f"🔍 Executing comprehensive query (this may take several minutes)...")
+            result = self.sf.query_all(query)
+            all_records = result['records']
             
-            print(f"✅ Found {len(accounts)} accounts with DocListEntry records")
+            print(f"✅ Retrieved {len(all_records):,} total DocListEntry records")
             
-            # Process and enrich account data
+            # Group records by account in Python
+            print("🔍 Grouping records by account...")
+            account_data = {}
+            
+            for i, record in enumerate(all_records):
+                account_id = record['Account__c']
+                account_name = record.get('Account__r', {}).get('Name', 'Unknown Account') if record.get('Account__r') else 'Unknown Account'
+                file_size = record.get('File_Size__c', 0) or 0
+                
+                if account_id not in account_data:
+                    account_data[account_id] = {
+                        'account_id': account_id,
+                        'account_name': account_name,
+                        'file_count': 0,
+                        'total_size_bytes': 0,
+                        'files': []
+                    }
+                
+                account_data[account_id]['file_count'] += 1
+                account_data[account_id]['total_size_bytes'] += float(file_size)
+                account_data[account_id]['files'].append({
+                    'id': record['Id'],
+                    'size': file_size
+                })
+                
+                # Progress indicator for large datasets
+                if (i + 1) % 10000 == 0:
+                    print(f"  📈 Processed {i+1:,}/{len(all_records):,} records...")
+            
+            print(f"✅ Grouped into {len(account_data):,} unique accounts")
+            
+            # Convert to list and sort by file count
             enriched_accounts = []
             total_files = 0
+            total_size_bytes = 0
             
-            for i, account in enumerate(accounts, 1):
-                account_id = account['Account__c']
-                account_name = account['Account__r']['Name'] if account.get('Account__r') else 'Unknown Account'
-                file_count = account['expr0']  # Salesforce returns COUNT() as 'expr0'
-                total_files += file_count
-                
-                # Get sample file info for size estimation
-                size_estimate = self._estimate_account_size(account_id, file_count)
+            for rank, (account_id, data) in enumerate(
+                sorted(account_data.items(), key=lambda x: x[1]['file_count'], reverse=True), 1
+            ):
+                file_count = data['file_count']
+                size_bytes = data['total_size_bytes']
+                size_gb = size_bytes / (1024 * 1024 * 1024) if size_bytes > 0 else 0
                 
                 enriched_account = {
-                    'rank': i,
+                    'rank': rank,
                     'account_id': account_id,
-                    'account_name': account_name,
+                    'account_name': data['account_name'],
                     'file_count': file_count,
-                    'estimated_size_gb': size_estimate,
-                    'percentage_of_total': 0  # Will calculate after we have totals
+                    'estimated_size_gb': round(size_gb, 3),
+                    'total_size_bytes': size_bytes,
+                    'percentage_of_total': 0  # Will calculate after totals
                 }
                 
                 enriched_accounts.append(enriched_account)
-                
-                # Progress indicator for large datasets
-                if i % 10 == 0:
-                    print(f"  📈 Processed {i}/{len(accounts)} accounts...")
+                total_files += file_count
+                total_size_bytes += size_bytes
             
-            # Calculate percentages now that we have totals
+            # Calculate percentages
             for account in enriched_accounts:
                 account['percentage_of_total'] = (account['file_count'] / total_files * 100) if total_files > 0 else 0
             
-            self.analysis_results['total_accounts'] = len(accounts)
+            # Store results
+            self.analysis_results['total_accounts'] = len(enriched_accounts)
             self.analysis_results['total_files'] = total_files
+            self.analysis_results['estimated_total_size_gb'] = round(total_size_bytes / (1024 * 1024 * 1024), 2)
             self.analysis_results['account_breakdown'] = enriched_accounts
+            
+            print(f"📊 FINAL TOTALS:")
+            print(f"   🏢 Total Accounts: {len(enriched_accounts):,}")
+            print(f"   📄 Total Files: {total_files:,}")
+            print(f"   💾 Total Size: {self.analysis_results['estimated_total_size_gb']:,.2f} GB")
+            
+            accounts = enriched_accounts
             
             return enriched_accounts
             
