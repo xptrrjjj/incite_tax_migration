@@ -70,7 +70,7 @@ class ComprehensiveAnalysis:
             SELECT 
                 Account__c,
                 Account__r.Name,
-                COUNT(Id) as FileCount
+                COUNT(Id)
             FROM DocListEntry__c 
             WHERE Account__c != NULL 
             GROUP BY Account__c, Account__r.Name 
@@ -90,7 +90,7 @@ class ComprehensiveAnalysis:
             for i, account in enumerate(accounts, 1):
                 account_id = account['Account__c']
                 account_name = account['Account__r']['Name'] if account.get('Account__r') else 'Unknown Account'
-                file_count = account['FileCount']
+                file_count = account['expr0']  # Salesforce returns COUNT() as 'expr0'
                 total_files += file_count
                 
                 # Get sample file info for size estimation
