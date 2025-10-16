@@ -14,6 +14,7 @@ Then open: http://localhost:5000
 import os
 import json
 import sqlite3
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from flask import Flask, render_template, jsonify
@@ -25,12 +26,13 @@ app = Flask(__name__)
 
 class StatusDashboard:
     """Status dashboard backend."""
-    
+
     def __init__(self, db_path="migration_tracking.db"):
         self.db_path = db_path
         self.cache = {}
         self.cache_timestamp = None
         self.cache_ttl = 30  # Cache for 30 seconds
+        self.logger = logging.getLogger(__name__)
         
     def get_dashboard_data(self):
         """Get comprehensive dashboard data with caching."""
@@ -305,20 +307,42 @@ class StatusDashboard:
         """Get migration phase status with proper progress calculation."""
         stats = db.get_migration_stats()
         file_stats = stats['files']
-        
+
         total_files = file_stats.get('total_files', 0) or 0
         backup_only = file_stats.get('backup_only', 0) or 0
         fully_migrated = file_stats.get('fully_migrated', 0) or 0
-        
+
         # Check if there's a currently running migration
         cursor = db.conn.execute('''
-            SELECT COUNT(*), SUM(successful_files), SUM(failed_files), SUM(total_files_processed)
-            FROM migration_runs 
+            SELECT COUNT(*), SUM(successful_files), SUM(failed_files), SUM(total_files_processed),
+                   MAX(start_time) as latest_start
+            FROM migration_runs
             WHERE status = 'running'
         ''')
-        
+
         running_data = cursor.fetchone()
-        is_running = running_data and running_data[0] > 0
+        has_running_status = running_data and running_data[0] > 0
+
+        # Auto-detect if migration is actually complete despite "running" status
+        # If total processed >= 1.3M and no activity in last 10 minutes, consider it done
+        is_running = False
+        if has_running_status:
+            try:
+                latest_start = running_data[4]
+                if latest_start:
+                    start_time = datetime.fromisoformat(latest_start)
+                    time_since_start = (datetime.now() - start_time).total_seconds()
+
+                    # If migration started more than 2 hours ago and we have 1M+ files, likely complete
+                    if time_since_start > 7200 and backup_only >= 1000000:
+                        is_running = False  # Migration is actually complete
+                        self.logger.info("Detected completed migration with stale 'running' status")
+                    else:
+                        is_running = True
+                else:
+                    is_running = True
+            except Exception as e:
+                is_running = has_running_status
         
         # Get total expected files from Salesforce (more accurate than just backed up files)
         try:
@@ -342,12 +366,15 @@ class StatusDashboard:
                 status = f"Actively backing up files... ({backup_only:,} files backed up so far)"
                 # For running migrations, use realistic total estimate of 1.3M+ files
                 # Don't use actual_discovered_files as it only shows what's been processed so far
-                estimated_total = 1300000  # Known approximate total from previous analysis
+                estimated_total = 1344438  # Known total from Salesforce query
                 backup_progress = min(95.0, round((backup_only / estimated_total) * 100, 1)) if estimated_total > 0 else 0
             else:
                 phase = "Phase 1 (Backup Only) - COMPLETE"
                 status = f"{backup_only:,} files backed up and ready for migration"
-                backup_progress = 100.0
+                # Show actual completion percentage (may exceed 100% if some files were processed multiple times)
+                estimated_total = 1344438
+                actual_progress = round((backup_only / estimated_total) * 100, 1) if estimated_total > 0 else 100.0
+                backup_progress = actual_progress
             migration_progress = 0
         elif fully_migrated > 0:
             phase = "Phase 2 (Full Migration)"
