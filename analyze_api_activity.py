@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 API Activity Analysis Script
 =============================
@@ -24,11 +25,17 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from pathlib import Path
 import sys
+import io
+
+# Fix Windows console encoding for emoji support
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 class APIActivityAnalyzer:
     """Analyze API activity patterns from migration metadata."""
 
-    def __init__(self, db_path: str = "migration_tracker.db"):
+    def __init__(self, db_path: str = "migration_tracking.db"):
         """Initialize analyzer with database path."""
         self.db_path = db_path
         self.conn = None
@@ -375,8 +382,8 @@ def main():
     )
     parser.add_argument(
         '--db',
-        default='migration_tracker.db',
-        help='Path to migration database (default: migration_tracker.db)'
+        default='migration_tracking.db',
+        help='Path to migration database (default: migration_tracking.db)'
     )
 
     args = parser.parse_args()
