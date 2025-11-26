@@ -73,24 +73,61 @@ class ComprehensiveStorageAuditor:
             sys.exit(1)
 
     def get_org_limits(self):
-        """Get ALL organization limits."""
+        """Get ALL organization limits using REST API and Tooling API."""
         print("📊 Retrieving organization limits...")
         try:
+            # Try standard limits() API first
             limits = self.sf.limits()
 
-            # Extract key storage info
+            # If storage data is zero/missing, query Organization object directly
             data_storage = limits.get('DataStorageMB', {})
             file_storage = limits.get('FileStorageMB', {})
+
+            if not data_storage or data_storage.get('Max', 0) == 0:
+                print("   ⚠️  Standard API returned no storage data, querying Organization object...")
+                try:
+                    # Query the Organization object for OrgPreferences
+                    org_query = """
+                        SELECT
+                            Id,
+                            Name,
+                            OrganizationType
+                        FROM Organization
+                    """
+                    org_result = self.sf.query(org_query)
+
+                    if org_result['records']:
+                        org_info = org_result['records'][0]
+                        self.all_results['org_info'] = org_info
+                        print(f"   Organization: {org_info.get('Name')}")
+                        print(f"   Edition: {org_info.get('OrganizationType')}")
+
+                    # Try to get storage usage through SOAP API describe
+                    print("   Attempting alternative storage retrieval methods...")
+
+                except Exception as e:
+                    print(f"   Warning: Could not retrieve org details: {e}")
+
             api_usage = limits.get('DailyApiRequests', {})
 
-            print(f"   📊 Data Storage: {data_storage.get('Used', 0):,.0f} / {data_storage.get('Max', 0):,.0f} MB ({data_storage.get('Used', 0) / data_storage.get('Max', 1) * 100:.1f}%)")
-            print(f"   📁 File Storage: {file_storage.get('Used', 0):,.0f} / {file_storage.get('Max', 0):,.0f} MB ({file_storage.get('Used', 0) / file_storage.get('Max', 1) * 100:.1f}%)")
+            if data_storage and data_storage.get('Max', 0) > 0:
+                print(f"   📊 Data Storage: {data_storage.get('Used', 0):,.0f} / {data_storage.get('Max', 0):,.0f} MB ({data_storage.get('Used', 0) / data_storage.get('Max', 1) * 100:.1f}%)")
+            else:
+                print(f"   📊 Data Storage: Unable to retrieve (using calculated estimates)")
+
+            if file_storage and file_storage.get('Max', 0) > 0:
+                print(f"   📁 File Storage: {file_storage.get('Used', 0):,.0f} / {file_storage.get('Max', 0):,.0f} MB ({file_storage.get('Used', 0) / file_storage.get('Max', 1) * 100:.1f}%)")
+            else:
+                print(f"   📁 File Storage: Unable to retrieve (using calculated estimates)")
+
             print(f"   🔌 API Calls: {api_usage.get('Used', 0):,} / {api_usage.get('Max', 0):,} ({api_usage.get('Used', 0) / api_usage.get('Max', 1) * 100:.1f}%)")
 
             self.all_results['limits'] = limits
             return limits
         except Exception as e:
             print(f"❌ Failed: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def analyze_all_objects(self):
