@@ -1,0 +1,201 @@
+====================================================================================================
+COMPLETE SALESFORCE STORAGE ANALYSIS
+====================================================================================================
+
+This will analyze ALL objects to determine storage consumption.
+This may take several minutes...
+
+====================================================================================================
+STEP 1: DISCOVERING ALL SALESFORCE OBJECTS
+====================================================================================================
+
+📊 Object Discovery:
+   Total Objects:    802
+   Standard Objects: 740
+   Custom Objects:   58
+   File Objects:     4
+
+====================================================================================================
+STEP 2: FILE STORAGE ANALYSIS
+====================================================================================================
+   Attachment               :            1
+   ContentDocument          :          241
+   ContentVersion           :          241
+   Document                 :           12
+
+   TOTAL FILE OBJECTS       :          495
+
+📊 File Storage Estimate:
+   Estimated: ~0.48 GB
+   (Assuming 1MB average file size)
+
+====================================================================================================
+STEP 3: CUSTOM OBJECTS ANALYSIS (DATA STORAGE)
+====================================================================================================
+
+⏳ Counting records in custom objects (this may take a few minutes)...
+   Progress: 50/58 objects checked...
+
+📊 Top Custom Objects by Record Count:
+Object Name                                      Records    Est. Storage (MB)
+--------------------------------------------------------------------------------
+DocListEntry__c                                1,917,660              3,745.4
+DocListEntryPage__c                            1,766,777              3,450.7
+DocListEntryPageItem__c                        1,297,703              2,534.6
+DocAnnotations__c                              1,245,474              2,432.6
+DocListEntryHistory__c                         1,195,307              2,334.6
+DocListEntryVersion__c                           908,702              1,774.8
+CH_Transaction__c                                423,687                827.5
+Notification__c                                  372,734                728.0
+Typeform_DocListEntry_Item__c                    144,666                282.6
+Client_History__c                                103,570                202.3
+TypeForm__c                                       60,317                117.8
+RC_SMS_Job__c                                     54,042                105.6
+CH_Order__c                                       40,723                 79.5
+ChargentBase__Aggregation__c                      14,073                 27.5
+RC_SMS_Record__c                                  13,671                 26.7
+Iris_InstantMessage__c                            13,236                 25.9
+BookkeepingLog__c                                 12,423                 24.3
+Calendly__CalendlyAction__c                       11,113                 21.7
+RC_SMS_Thread__c                                   6,987                 13.6
+Iris_InstantMessageThread__c                       4,536                  8.9
+typeform__Typeform_Error__c                        1,680                  3.3
+typeform__Form__c                                    169                  0.3
+TaxonomyItem__c                                      150                  0.3
+TaxonomyCategoryItem__c                              147                  0.3
+MC4SF__MC_Merge_Variable__c                          127                  0.2
+Calendly__CalendlyLink__c                             54                  0.1
+Business__c                                           48                  0.1
+MC4SF__MC_List__c                                     42                  0.1
+ChargentBase__Country_Mapping__c                      40                  0.1
+TaxonomyCategory__c                                    8                  0.0
+rcsfl__AdminSetting__c                                 7                  0.0
+ChargentBase__Gateway__c                               4                  0.0
+typeform__Form_Mapping__c                              2                  0.0
+CFO_Service__c                                         1                  0.0
+ChargentBase__Chargent_Settings__c                     1                  0.0
+rcsfl__AdminUISetting__c                               1                  0.0
+typeform__InstallationSettings__c                      1                  0.0
+typeform__Typeform_API_Settings__c                     1                  0.0
+
+TOTAL ALL CUSTOM OBJECTS                       9,609,884             18,769.3
+
+📊 Total Custom Objects Storage: ~18.33 GB
+
+====================================================================================================
+STEP 4: STANDARD OBJECTS ANALYSIS (DATA STORAGE)
+====================================================================================================
+
+📊 Key Standard Objects:
+Object Name                                      Records    Est. Storage (MB)
+--------------------------------------------------------------------------------
+Account                                           52,468                102.5
+Contact                                          108,477                211.9
+Lead                                              56,480                110.3
+Opportunity                                      133,814                261.4
+Case                                             114,473                223.6
+Task                                             708,710              1,384.2
+Event                                              6,560                 12.8
+User                                                 543                  1.1
+Note                                                   3                  0.0
+
+TOTAL KEY STANDARD OBJECTS                     1,181,528              2,307.7
+
+📊 Standard Objects Storage: ~2.25 GB
+
+====================================================================================================
+STEP 5: SALESFORCE LIMITS CHECK
+====================================================================================================
+
+📊 ContentDocument Limit:
+   Max:       30,000,000
+   Used:      627,630
+   Remaining: 29,372,370
+   Usage:     2.09%
+
+❌ Storage limits (DataStorageMB, FileStorageMB) not available via API
+   These limits must be checked manually in:
+   Setup → System Overview → Storage Usage
+
+====================================================================================================
+🎯 COMPREHENSIVE STORAGE ANALYSIS
+====================================================================================================
+
+📊 STORAGE BREAKDOWN:
+
+1. FILE STORAGE (Actual Files):
+   Total Files:      495
+   Estimated Size:   ~0.48 GB
+
+2. DATA STORAGE (Records/Metadata):
+   Custom Objects:   9,609,884 records (~18.33 GB)
+   Standard Objects: 1,181,528 records (~2.25 GB)
+   TOTAL DATA:       ~20.58 GB
+
+3. CONTENTDOCUMENT LIMIT:
+   Usage: 627,630 of 30,000,000 (2.09%)
+   ✅ NOT an issue
+
+====================================================================================================
+🔍 TOP STORAGE CONSUMERS
+====================================================================================================
+
+📌 Top 10 Custom Objects:
+    1. DocListEntry__c                        1,917,660 records (~  3.66 GB)
+    2. DocListEntryPage__c                    1,766,777 records (~  3.37 GB)
+    3. DocListEntryPageItem__c                1,297,703 records (~  2.48 GB)
+    4. DocAnnotations__c                      1,245,474 records (~  2.38 GB)
+    5. DocListEntryHistory__c                 1,195,307 records (~  2.28 GB)
+    6. DocListEntryVersion__c                   908,702 records (~  1.73 GB)
+    7. CH_Transaction__c                        423,687 records (~  0.81 GB)
+    8. Notification__c                          372,734 records (~  0.71 GB)
+    9. Typeform_DocListEntry_Item__c            144,666 records (~  0.28 GB)
+   10. Client_History__c                        103,570 records (~  0.20 GB)
+
+====================================================================================================
+💡 DIAGNOSIS
+====================================================================================================
+
+📊 Storage Ratio Analysis:
+   File Storage:    ~0.48 GB
+   Data Storage:    ~20.58 GB
+   Ratio (File:Data): 0.0235
+
+🎯 LIKELY ISSUE: DATA STORAGE
+   ❌ File storage is minimal (0.48 GB)
+   ⚠️  Data storage is significant (20.58 GB)
+   💾 You are likely hitting DATA STORAGE limit, not FILE STORAGE
+
+📋 WHAT THIS MEANS:
+   - Storage issue is from RECORDS/METADATA, not FILES
+   - Each record consumes ~2KB of data storage
+   - 10,791,412 total records
+
+❌ WILL S3 FILE MIGRATION HELP?
+   NO - S3 migration moves FILES, not RECORDS
+   - DocListEntry__c records will still exist in Salesforce
+   - Moving files to S3 only changes the URL field
+   - Record count stays the same = same data storage
+
+✅ WHAT WOULD ACTUALLY HELP:
+   1. DELETE or ARCHIVE old records
+   2. Export historical data to external system
+   3. Implement data retention policies
+   4. Use Salesforce Big Objects for archival
+
+====================================================================================================
+📖 SALESFORCE ENTERPRISE EDITION STORAGE LIMITS
+====================================================================================================
+
+Standard Allocations:
+   Data Storage: 10 GB + 20 MB per user license
+   File Storage: 10 GB + 2 GB per user license
+
+⚠️  IMPORTANT:
+   The limits() API does NOT return actual storage limits
+   You MUST check Salesforce UI to see your actual limits:
+   Setup → System Overview → Storage Usage
+
+====================================================================================================
+✅ ANALYSIS COMPLETE
+====================================================================================================
